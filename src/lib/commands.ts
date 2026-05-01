@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   CompletenessReport,
   DailyReviewRun,
+  DataHealth,
   KlineBar,
   KlineCoverage,
   KlineSyncResult,
@@ -15,6 +16,7 @@ import type {
   ProviderTestResult,
   SaveModelProviderInput,
   Security,
+  SecuritySearchResult,
   StockMeta,
   StockReview,
   TradeSystemDetail,
@@ -157,5 +159,11 @@ export const commands = {
     annotation: Omit<ChartAnnotation, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
   ) => call<ChartAnnotation>('save_chart_annotation', { annotation }),
   deleteChartAnnotation: (annotationId: string) =>
-    call<OkResult>('delete_chart_annotation', { annotationId })
+    call<OkResult>('delete_chart_annotation', { annotationId }),
+
+  searchSecurities: (keyword: string, limit?: number) =>
+    call<SecuritySearchResult[]>('search_securities', { keyword, limit }),
+
+  getDataHealth: () =>
+    call<DataHealth>('get_data_health'),
 }

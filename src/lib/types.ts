@@ -134,6 +134,9 @@ export type KlineBar = {
   amount: number
   turnover?: number | null
   adjFactor?: number | null
+  change?: number | null
+  changePct?: number | null
+  amplitude?: number | null
 }
 
 export type FrequencyCoverage = {
@@ -256,6 +259,22 @@ export type ChartAnnotationPayload =
 
 export type OkResult = {
   ok: boolean
+}
+
+export type SecuritySearchResult = {
+  code: string
+  name: string
+  marketType?: string | null
+  stockType: string
+}
+
+export type DataHealth = {
+  totalSecurities: number
+  completeCount: number
+  incompleteCount: number
+  completenessPct: number
+  mood: 'good' | 'ok' | 'bad'
+  byMarket: Array<{ marketType: string; total: number; complete: number }>
 }
 
 export type StockMeta = {
