@@ -13,6 +13,9 @@ pub struct DailyBar {
     pub amount: f64,
     pub turnover: Option<f64>,
     pub adj_factor: Option<f64>,
+    pub change: Option<f64>,
+    pub change_pct: Option<f64>,
+    pub amplitude: Option<f64>,
     pub source: String,
 }
 

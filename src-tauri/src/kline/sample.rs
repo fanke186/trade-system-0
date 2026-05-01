@@ -42,6 +42,9 @@ impl KlineProvider for SampleKlineProvider {
                     amount: round2(amount),
                     turnover: Some(round2(1.0 + (index % 8.0) * 0.18)),
                     adj_factor: Some(1.0),
+                    change: None,
+                    change_pct: None,
+                    amplitude: None,
                     source: self.name().to_string(),
                 });
                 previous_close = close;

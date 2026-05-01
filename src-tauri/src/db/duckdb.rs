@@ -96,6 +96,28 @@ pub fn run_migrations(conn: &DuckConnection) -> AppResult<()> {
           error text
         );
 
+        alter table bars_1d add column if not exists change double;
+        alter table bars_1d add column if not exists change_pct double;
+        alter table bars_1d add column if not exists amplitude double;
+        alter table bars_1w add column if not exists change double;
+        alter table bars_1w add column if not exists change_pct double;
+        alter table bars_1w add column if not exists amplitude double;
+        alter table bars_1M add column if not exists change double;
+        alter table bars_1M add column if not exists change_pct double;
+        alter table bars_1M add column if not exists amplitude double;
+
+        alter table securities add column if not exists industry text;
+        alter table securities add column if not exists sub_industry text;
+        alter table securities add column if not exists area text;
+        alter table securities add column if not exists market_type text;
+        alter table securities add column if not exists stock_type text default 'stock';
+        alter table securities add column if not exists total_cap double;
+        alter table securities add column if not exists pe_ratio double;
+
+        update securities set stock_type = 'stock' where stock_type is null;
+
+        insert or ignore into schema_migrations (id, applied_at)
+        values ('0002_add_kline_fields', current_timestamp);
         insert or ignore into schema_migrations (id, applied_at)
         values ('0001_initial_duckdb', current_timestamp);
         "#,
@@ -116,6 +138,20 @@ fn seed_defaults(conn: &DuckConnection) -> AppResult<()> {
             "insert or ignore into securities (symbol_id, code, name, exchange, board, list_date, status)
              values (?1, ?2, ?3, ?4, ?5, cast(?6 as date), 'active')",
             duckdb::params![symbol_id, code, name, exchange, board, list_date],
+        )?;
+    }
+
+    for (symbol_id, code, name, exchange, stock_type) in [
+        (1001_i64, "000001", "上证指数", "SH", "index"),
+        (1002_i64, "399001", "深证成指", "SZ", "index"),
+        (1003_i64, "399006", "创业板指", "SZ", "index"),
+        (1004_i64, "000688", "科创50", "SH", "index"),
+        (1005_i64, "000300", "沪深300", "SH", "index"),
+        (1006_i64, "000905", "中证500", "SH", "index"),
+    ] {
+        conn.execute(
+            "insert or ignore into securities (symbol_id, code, name, exchange, stock_type, status) values (?1, ?2, ?3, ?4, ?5, 'active')",
+            duckdb::params![symbol_id, code, name, exchange, stock_type],
         )?;
     }
     Ok(())

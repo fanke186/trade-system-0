@@ -2,16 +2,35 @@ use crate::app_state::AppState;
 use crate::error::AppResult;
 use crate::models::{AggregateResult, KlineBar, KlineCoverage, KlineSyncResult, Security};
 use crate::services::{kline_query_service, kline_sync_service};
-use tauri::State;
+use serde_json::json;
+use tauri::{Emitter, State};
 
 #[tauri::command]
-pub fn sync_kline(
+pub async fn sync_kline(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     stock_code: String,
     mode: String,
 ) -> AppResult<KlineSyncResult> {
+    let _ = app.emit(
+        "kline-sync-progress",
+        json!({
+            "stockCode": stock_code,
+            "status": "started",
+            "percent": 0,
+        }),
+    );
     let conn = state.duckdb.lock().expect("duckdb lock");
-    kline_sync_service::sync_kline(&conn, &stock_code, &mode)
+    let result = kline_sync_service::sync_kline(&conn, &stock_code, &mode);
+    let _ = app.emit(
+        "kline-sync-progress",
+        json!({
+            "stockCode": stock_code,
+            "status": "completed",
+            "percent": 100,
+        }),
+    );
+    result
 }
 
 #[tauri::command]

@@ -55,7 +55,8 @@ pub fn get_bars(
         select *
           from (
             select cast(trade_date as varchar) as trade_date, open, high, low, close,
-                   null as pre_close, volume, amount, turnover, adj_factor
+                   null as pre_close, volume, amount, turnover, adj_factor,
+                   change, change_pct, amplitude
               from {table}
              where symbol_id = ?1
                and (?2 is null or trade_date >= cast(?2 as date))
@@ -80,6 +81,9 @@ pub fn get_bars(
                 amount: row.get(7)?,
                 turnover: row.get(8)?,
                 adj_factor: row.get(9)?,
+                change: row.get(10)?,
+                change_pct: row.get(11)?,
+                amplitude: row.get(12)?,
             })
         },
     )?;

@@ -85,6 +85,9 @@ impl KlineProvider for EastmoneyDailyBarProvider {
                 pre_close: None,
                 turnover: parts.get(10).and_then(|value| value.parse::<f64>().ok()),
                 adj_factor: Some(1.0),
+                change: parts.get(9).and_then(|value| value.parse::<f64>().ok()),
+                change_pct: parts.get(8).and_then(|value| value.parse::<f64>().ok()),
+                amplitude: parts.get(7).and_then(|value| value.parse::<f64>().ok()),
                 source: self.name().to_string(),
             });
         }
@@ -167,6 +170,9 @@ impl TencentDailyBarProvider {
                 amount: volume * close,
                 turnover: None,
                 adj_factor: Some(1.0),
+                change: None,
+                change_pct: None,
+                amplitude: None,
                 source: self.name().to_string(),
             });
         }

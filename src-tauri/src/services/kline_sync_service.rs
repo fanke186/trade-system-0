@@ -233,8 +233,8 @@ fn upsert_daily_bars(conn: &DuckConnection, symbol_id: i64, bars: &[DailyBar]) -
             r#"
             insert into bars_1d
               (symbol_id, trade_date, open, high, low, close, pre_close, volume, amount,
-               turnover, adj_factor, source, updated_at)
-            values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, current_timestamp)
+               turnover, adj_factor, change, change_pct, amplitude, source, updated_at)
+            values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, current_timestamp)
             on conflict(symbol_id, trade_date) do update set
               open = excluded.open,
               high = excluded.high,
@@ -245,6 +245,9 @@ fn upsert_daily_bars(conn: &DuckConnection, symbol_id: i64, bars: &[DailyBar]) -
               amount = excluded.amount,
               turnover = excluded.turnover,
               adj_factor = excluded.adj_factor,
+              change = excluded.change,
+              change_pct = excluded.change_pct,
+              amplitude = excluded.amplitude,
               source = excluded.source,
               updated_at = excluded.updated_at
             "#,
@@ -260,6 +263,9 @@ fn upsert_daily_bars(conn: &DuckConnection, symbol_id: i64, bars: &[DailyBar]) -
                 bar.amount,
                 bar.turnover,
                 bar.adj_factor,
+                bar.change,
+                bar.change_pct,
+                bar.amplitude,
                 bar.source
             ],
         )?;

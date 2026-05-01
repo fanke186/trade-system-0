@@ -87,6 +87,9 @@ fn load_daily(conn: &Connection, symbol_id: i64) -> AppResult<Vec<DailyBar>> {
             amount: row.get(7)?,
             turnover: row.get(8)?,
             adj_factor: row.get(9)?,
+            change: None,
+            change_pct: None,
+            amplitude: None,
             source: row.get(10)?,
         })
     })?;
@@ -121,6 +124,9 @@ where
                 amount: bars.iter().map(|bar| bar.amount).sum(),
                 turnover: average_optional(&bars, |bar| bar.turnover),
                 adj_factor: last.adj_factor,
+                change: None,
+                change_pct: None,
+                amplitude: None,
                 source: "aggregate".to_string(),
             })
         })

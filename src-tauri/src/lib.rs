@@ -62,7 +62,10 @@ pub fn run() {
             commands::watchlist::remove_watchlist_item,
             commands::annotation::list_chart_annotations,
             commands::annotation::save_chart_annotation,
-            commands::annotation::delete_chart_annotation
+            commands::annotation::delete_chart_annotation,
+            commands::data_ops::search_securities,
+            commands::data_ops::get_data_health,
+            commands::data_ops::sync_securities_metadata,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run trade-system-0");
