@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
-  init, dispose, registerLocale, registerIndicator,
+  init, dispose, registerLocale,
   ActionType, IndicatorSeries, YAxisType, OverlayMode, LineType
 } from 'klinecharts'
 import type { Chart, Crosshair } from 'klinecharts'
@@ -20,14 +20,6 @@ registerLocale('zh-CN', {
   turnover: '成交额'
 })
 
-registerIndicator({
-  name: 'AMOUNT',
-  shortName: 'AMOUNT',
-  series: IndicatorSeries.Volume,
-  calc: (dataList: Array<Record<string, unknown>>) =>
-    dataList.map(k => ({ amount: (k.turnover as number) || 0 })),
-  figures: [{ key: 'amount', title: '成交额', type: 'bar' }]
-})
 
 export function KLineChartPanel({
   bars,
@@ -35,6 +27,7 @@ export function KLineChartPanel({
   drawingTool,
   onDrawComplete,
   subChartType,
+  onSubChartTypeChange,
   maLines,
   coordType,
   onCrosshairBar,
@@ -45,6 +38,7 @@ export function KLineChartPanel({
   drawingTool: 'horizontal_line' | 'ray' | null
   onDrawComplete: (payload: ChartAnnotationPayload) => void
   subChartType?: 'volume' | 'amount'
+  onSubChartTypeChange?: (type: 'volume' | 'amount') => void
   maLines?: Array<{ period: number; color: string; enabled: boolean }>
   coordType?: 'normal' | 'log'
   onCrosshairBar?: (bar: KlineBar | null) => void
@@ -80,10 +74,10 @@ export function KLineChartPanel({
         high: bar.high,
         low: bar.low,
         close: bar.close,
-        volume: bar.volume,
+        volume: subChartType === 'amount' ? bar.amount : bar.volume,
         turnover: bar.amount
       })),
-    [bars]
+    [bars, subChartType]
   )
 
   useEffect(() => {
@@ -102,7 +96,7 @@ export function KLineChartPanel({
         },
         candle: {
           bar: {
-            upColor: 'rgba(220, 38, 38, 0.10)',
+            upColor: '#0d0d0d',
             upBorderColor: '#dc2626',
             upWickColor: '#dc2626',
             downColor: '#0f9f6e',
@@ -122,6 +116,8 @@ export function KLineChartPanel({
     if (!chart) return
     chartRef.current = chart
     subPaneIdRef.current = null
+
+    chart.setBarSpace(0.01)
 
     chart.subscribeAction(ActionType.OnCrosshairChange, (data: unknown) => {
       const crosshair = data as Crosshair | undefined
@@ -178,6 +174,7 @@ export function KLineChartPanel({
     const chart = chartRef.current
     if (!chart) return
     chart.applyNewData(chartData)
+    chart.setBarSpace(0)
     chart.removeOverlay?.({ groupId: 'persisted' })
     annotations.forEach(annotation => {
       const overlay = annotationToOverlay(annotation)
@@ -214,7 +211,34 @@ export function KLineChartPanel({
     )
   }, [drawingTool, onDrawComplete])
 
-  // Sub-chart indicator (VOL / AMOUNT)
+  // MA overlay (MUST come before sub-chart to stay on candle_pane)
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+
+    const enabledMas = (maLines ?? []).filter(ma => ma.enabled)
+    const existing = chart.getIndicatorByPaneId?.('candle_pane', 'MA')
+    if (existing) {
+      chart.removeIndicator('candle_pane', 'MA')
+    }
+
+    if (enabledMas.length > 0) {
+      chart.createIndicator?.(
+        {
+          name: 'MA',
+          calcParams: enabledMas.map(ma => ma.period),
+          styles: {
+            lines: enabledMas.map(ma => ({
+              color: ma.color, size: 1, style: LineType.Solid, smooth: false, dashedValue: []
+            }))
+          }
+        } as never,
+        false
+      )
+    }
+  }, [maLines, bars.length])
+
+  // Sub-chart indicator (VOL)
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
@@ -228,36 +252,9 @@ export function KLineChartPanel({
       subPaneIdRef.current = null
     }
 
-    const name = subChartType === 'amount' ? 'AMOUNT' : 'VOL'
-    const paneId = chart.createIndicator(name, false, { height: 120 })
+    const paneId = chart.createIndicator('VOL', false, { height: 120 })
     subPaneIdRef.current = paneId ?? null
   }, [subChartType, bars.length])
-
-  // MA overlay
-  useEffect(() => {
-    const chart = chartRef.current
-    if (!chart) return
-
-    const existing = chart.getIndicatorByPaneId?.('candle_pane', 'MA')
-    if (existing) {
-      chart.removeIndicator('candle_pane', 'MA')
-    }
-
-    ;(maLines ?? [])
-      .filter(ma => ma.enabled)
-      .forEach(ma => {
-        chart.createIndicator?.(
-          {
-            name: 'MA',
-            calcParams: [ma.period],
-            styles: {
-              lines: [{ color: ma.color, size: 1, style: LineType.Solid, smooth: false, dashedValue: [] }]
-            }
-          },
-          false
-        )
-      })
-  }, [maLines, bars.length])
 
   // Log coordinate
   useEffect(() => {
@@ -317,6 +314,19 @@ export function KLineChartPanel({
   return (
     <div className="relative w-full h-full">
       <div ref={hostRef} className="kline-chart-host w-full h-full" />
+
+      {/* Sub-chart toggle */}
+      <div className="absolute bottom-1 left-2 z-30 flex gap-0.5">
+        <button type="button" onClick={() => onSubChartTypeChange?.('volume')}
+          className={`h-5 px-1.5 text-[10px] font-mono transition ${subChartType === 'volume' ? 'bg-ring text-panel' : 'text-muted-foreground hover:text-foreground'}`}>
+          成交量
+        </button>
+        <button type="button" onClick={() => onSubChartTypeChange?.('amount')}
+          className={`h-5 px-1.5 text-[10px] font-mono transition ${subChartType === 'amount' ? 'bg-ring text-panel' : 'text-muted-foreground hover:text-foreground'}`}>
+          成交额
+        </button>
+      </div>
+
       {showDrawingToolbar && selectedOverlayId && (
         <DrawingToolbar
           position={toolbarPosition}

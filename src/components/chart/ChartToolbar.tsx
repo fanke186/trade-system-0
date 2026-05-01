@@ -4,7 +4,6 @@ import { cn } from '../../lib/cn'
 type Frequency = '1d' | '1w' | '1M'
 type AdjMode = 'pre' | 'post' | 'none'
 type DrawingTool = 'horizontal_line' | 'ray' | null
-type SubChartType = 'volume' | 'amount'
 
 export function ChartToolbar({
   stockName,
@@ -17,8 +16,6 @@ export function ChartToolbar({
   settingsOpen,
   drawingTool,
   onDrawingToolChange,
-  subChartType,
-  onSubChartTypeChange,
 }: {
   stockName: string
   stockCode: string
@@ -30,8 +27,6 @@ export function ChartToolbar({
   settingsOpen: boolean
   drawingTool: DrawingTool
   onDrawingToolChange: (t: DrawingTool) => void
-  subChartType: SubChartType
-  onSubChartTypeChange: (t: SubChartType) => void
 }) {
   const freqLabels: Record<Frequency, string> = { '1d': '日K', '1w': '周K', '1M': '月K' }
   const adjLabels: Record<AdjMode, string> = { pre: '前复权', post: '后复权', none: '除权' }
@@ -105,36 +100,6 @@ export function ChartToolbar({
           )}
         >
           射线
-        </button>
-      </div>
-
-      <div className="h-4 w-px bg-border" />
-
-      {/* Sub-chart toggle */}
-      <div className="flex gap-0.5">
-        <button
-          type="button"
-          onClick={() => onSubChartTypeChange('volume')}
-          className={cn(
-            'h-7 px-2.5 text-xs font-mono transition',
-            subChartType === 'volume'
-              ? 'bg-ring text-panel'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-          )}
-        >
-          成交量
-        </button>
-        <button
-          type="button"
-          onClick={() => onSubChartTypeChange('amount')}
-          className={cn(
-            'h-7 px-2.5 text-xs font-mono transition',
-            subChartType === 'amount'
-              ? 'bg-ring text-panel'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-          )}
-        >
-          成交额
         </button>
       </div>
 

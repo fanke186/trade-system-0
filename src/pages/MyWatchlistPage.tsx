@@ -97,8 +97,6 @@ export function MyWatchlistPage({
           settingsOpen={settingsOpen}
           drawingTool={drawingTool}
           onDrawingToolChange={setDrawingTool}
-          subChartType={subChartType}
-          onSubChartTypeChange={setSubChartType}
         />
 
         <div className="relative">
@@ -122,6 +120,7 @@ export function MyWatchlistPage({
             coordType={settings.coordType}
             onCrosshairBar={setCrosshairBar}
             onCrosshairPosition={setCrosshairPos}
+            onSubChartTypeChange={setSubChartType}
           />
           <CrosshairTooltip bar={crosshairBar} position={crosshairPos} />
         </div>

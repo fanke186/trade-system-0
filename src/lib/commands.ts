@@ -166,4 +166,7 @@ export const commands = {
 
   getDataHealth: () =>
     call<DataHealth>('get_data_health'),
+
+  syncSecuritiesMetadata: () =>
+    call<number>('sync_securities_metadata'),
 }

@@ -51,7 +51,7 @@ describe('App', () => {
       </QueryClientProvider>
     )
 
-    expect(await screen.findByText('trade-system-0')).toBeInTheDocument()
+    expect(await screen.findByText('QSGG')).toBeInTheDocument()
     expect(screen.getAllByText('我的自选').length).toBeGreaterThan(0)
   })
 })

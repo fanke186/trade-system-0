@@ -1,4 +1,4 @@
-import { type ReactElement, useMemo, useState } from 'react'
+import { type ReactElement, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AppShell } from '../components/layout/AppShell'
 import { commands } from '../lib/commands'
@@ -24,6 +24,10 @@ export function App() {
     queryKey: ['model-providers'],
     queryFn: commands.listModelProviders
   })
+  useEffect(() => {
+    commands.syncSecuritiesMetadata().catch(() => {})
+  }, [])
+
   const coverageQuery = useQuery({
     queryKey: ['coverage', stockCode],
     queryFn: () => commands.getDataCoverage(stockCode),
@@ -87,7 +91,11 @@ export function App() {
       selectedVersionId={activeVersionId}
       latestReview={latestReview}
     >
-      {page[activePage]}
+      {(Object.keys(page) as PageId[]).map(id => (
+        <div key={id} className={id === activePage ? 'contents' : 'hidden'}>
+          {page[id]}
+        </div>
+      ))}
     </AppShell>
   )
 }
