@@ -53,7 +53,7 @@ pub fn get_bars(
         r#"
         select *
           from (
-            select cast(trade_date as varchar), open, high, low, close,
+            select cast(trade_date as varchar) as trade_date, open, high, low, close,
                    null as pre_close, volume, amount, turnover, adj_factor
               from {table}
              where symbol_id = ?1
