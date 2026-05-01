@@ -17,12 +17,21 @@ pub fn aggregate_symbol(conn: &Connection, symbol_id: i64, frequency: &str) -> A
             let week = bar.date.iso_week();
             AggregateKey::Week(week.year(), week.week())
         }),
-        "1M" => aggregate_bars(daily, |bar| AggregateKey::Month(bar.date.year(), bar.date.month())),
+        "1M" => aggregate_bars(daily, |bar| {
+            AggregateKey::Month(bar.date.year(), bar.date.month())
+        }),
         _ => return Ok(0),
     };
 
-    let table = if frequency == "1w" { "bars_1w" } else { "bars_1M" };
-    conn.execute(&format!("delete from {} where symbol_id = ?1", table), duckdb::params![symbol_id])?;
+    let table = if frequency == "1w" {
+        "bars_1w"
+    } else {
+        "bars_1M"
+    };
+    conn.execute(
+        &format!("delete from {} where symbol_id = ?1", table),
+        duckdb::params![symbol_id],
+    )?;
     for bar in &rows {
         conn.execute(
             &format!(
@@ -129,4 +138,3 @@ where
         Some(values.iter().sum::<f64>() / values.len() as f64)
     }
 }
-

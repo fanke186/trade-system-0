@@ -19,11 +19,12 @@ impl KlineProvider for SampleKlineProvider {
         let mut bars = Vec::new();
         let mut current = start_date;
         let mut previous_close = 18.0 + (seed % 60.0);
-        let mut index = 0.0;
+        let mut index: f64 = 0.0;
 
         while current <= end_date {
             if is_trade_day(current) {
-                let drift = ((index / 17.0).sin() * 0.035) + ((index / 43.0).cos() * 0.018) + 0.0012;
+                let drift =
+                    ((index / 17.0).sin() * 0.035) + ((index / 43.0).cos() * 0.018) + 0.0012;
                 let open = previous_close * (1.0 + ((index / 11.0).sin() * 0.012));
                 let close = (previous_close * (1.0 + drift)).max(1.0);
                 let high = open.max(close) * (1.0 + 0.012 + ((index / 7.0).sin().abs() * 0.018));
