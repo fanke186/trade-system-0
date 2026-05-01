@@ -310,6 +310,22 @@ pub struct SaveChartAnnotationInput {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct StockMeta {
+    pub code: String,
+    pub name: String,
+    pub exchange: String,
+    pub board: Option<String>,
+    pub list_date: Option<String>,
+    pub latest_price: Option<f64>,
+    pub pre_close: Option<f64>,
+    pub change: Option<f64>,
+    pub change_pct: Option<f64>,
+    pub latest_date: Option<String>,
+    pub stale: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct OkResult {
     pub ok: bool,
 }

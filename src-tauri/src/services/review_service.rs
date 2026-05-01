@@ -49,9 +49,9 @@ pub async fn score_stock(
             ));
         }
 
-        let daily = get_bars(&duck, &stock_code, "1d", None, None, Some(160))?;
-        let weekly = get_bars(&duck, &stock_code, "1w", None, None, Some(80))?;
-        let monthly = get_bars(&duck, &stock_code, "1M", None, None, Some(60))?;
+        let daily = get_bars(&duck, &stock_code, "1d", None, None, Some(160), None)?;
+        let weekly = get_bars(&duck, &stock_code, "1w", None, None, Some(80), None)?;
+        let monthly = get_bars(&duck, &stock_code, "1M", None, None, Some(60), None)?;
         let annotations = annotation_service::list_chart_annotations(
             &sqlite,
             &stock_code,

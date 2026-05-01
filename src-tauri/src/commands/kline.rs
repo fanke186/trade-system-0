@@ -22,9 +22,10 @@ pub fn get_bars(
     start_date: Option<String>,
     end_date: Option<String>,
     limit: Option<i64>,
+    adj: Option<String>,
 ) -> AppResult<Vec<KlineBar>> {
     let conn = state.duckdb.lock().expect("duckdb lock");
-    kline_query_service::get_bars(&conn, &stock_code, &frequency, start_date, end_date, limit)
+    kline_query_service::get_bars(&conn, &stock_code, &frequency, start_date, end_date, limit, adj)
 }
 
 #[tauri::command]

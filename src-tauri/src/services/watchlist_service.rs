@@ -83,6 +83,97 @@ pub fn remove_watchlist_item(
     Ok(OkResult { ok: true })
 }
 
+pub fn reorder_watchlist_item(
+    conn: &Connection,
+    item_id: &str,
+    position: &str,
+) -> AppResult<OkResult> {
+    let now = now_iso();
+    let sort_order = match position {
+        "top" => -1_i64,
+        "bottom" => {
+            conn.query_row(
+                "select coalesce(max(sort_order), 0) + 1 from watchlist_items",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?
+        }
+        _ => return Err(AppError::new("invalid_position", "position 只允许 top、bottom", true)),
+    };
+    conn.execute(
+        "update watchlist_items set sort_order = ?1, updated_at = ?2 where id = ?3",
+        params![sort_order, now, item_id],
+    )?;
+    Ok(OkResult { ok: true })
+}
+
+pub fn move_watchlist_item(
+    conn: &Connection,
+    item_id: &str,
+    target_watchlist_id: &str,
+) -> AppResult<OkResult> {
+    let now = now_iso();
+    conn.execute(
+        "update watchlist_items set watchlist_id = ?1, updated_at = ?2 where id = ?3",
+        params![target_watchlist_id, now, item_id],
+    )?;
+    Ok(OkResult { ok: true })
+}
+
+pub fn create_watchlist_group(conn: &Connection, name: &str) -> AppResult<Watchlist> {
+    let now = now_iso();
+    let id = new_id("wl");
+    conn.execute(
+        "insert into watchlists (id, name, created_at, updated_at) values (?1, ?2, ?3, ?3)",
+        params![id, name, now],
+    )?;
+    Ok(Watchlist {
+        id,
+        name: name.to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+        items: Vec::new(),
+    })
+}
+
+pub fn delete_watchlist_group(conn: &Connection, watchlist_id: &str) -> AppResult<OkResult> {
+    // Prevent deleting the default watchlist
+    let name: String = conn.query_row(
+        "select name from watchlists where id = ?1",
+        params![watchlist_id],
+        |row| row.get(0),
+    )?;
+    if name == "我的自选" {
+        return Err(AppError::new(
+            "protected",
+            "不能删除默认自选股分组",
+            true,
+        ));
+    }
+    conn.execute(
+        "delete from watchlist_items where watchlist_id = ?1",
+        params![watchlist_id],
+    )?;
+    conn.execute(
+        "delete from watchlists where id = ?1",
+        params![watchlist_id],
+    )?;
+    Ok(OkResult { ok: true })
+}
+
+pub fn rename_watchlist_group(
+    conn: &Connection,
+    watchlist_id: &str,
+    new_name: &str,
+) -> AppResult<OkResult> {
+    let now = now_iso();
+    conn.execute(
+        "update watchlists set name = ?1, updated_at = ?2 where id = ?3",
+        params![new_name, now, watchlist_id],
+    )?;
+    Ok(OkResult { ok: true })
+}
+
 pub fn list_items(conn: &Connection, watchlist_id: &str) -> AppResult<Vec<WatchlistItem>> {
     let mut stmt = conn.prepare(
         r#"

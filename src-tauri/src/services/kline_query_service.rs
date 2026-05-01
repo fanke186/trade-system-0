@@ -45,6 +45,7 @@ pub fn get_bars(
     start_date: Option<String>,
     end_date: Option<String>,
     limit: Option<i64>,
+    adj: Option<String>,
 ) -> AppResult<Vec<KlineBar>> {
     let table = frequency_table(frequency)?;
     let symbol_id = get_symbol_id(conn, stock_code)?;
@@ -82,11 +83,69 @@ pub fn get_bars(
             })
         },
     )?;
-    let mut values = Vec::new();
+    let mut values: Vec<KlineBar> = Vec::new();
     for row in rows {
         values.push(row?);
     }
+
+    // Apply adjustment factor if requested
+    if let Some(adj_mode) = adj {
+        match adj_mode.as_str() {
+            "pre" => apply_pre_adj(&mut values),
+            "post" => apply_post_adj(&mut values),
+            _ => {} // unknown mode, return unadjusted
+        }
+    }
+
     Ok(values)
+}
+
+fn apply_pre_adj(bars: &mut [KlineBar]) {
+    if bars.is_empty() {
+        return;
+    }
+    let last_adj = bars.last().and_then(|b| b.adj_factor).unwrap_or(1.0);
+    if last_adj == 0.0 {
+        return;
+    }
+    for bar in bars.iter_mut() {
+        if let Some(factor) = bar.adj_factor {
+            if factor != 0.0 {
+                let ratio = last_adj / factor;
+                bar.open *= ratio;
+                bar.high *= ratio;
+                bar.low *= ratio;
+                bar.close *= ratio;
+                bar.pre_close = bar.pre_close.map(|v| v * ratio);
+                bar.volume /= ratio;
+                bar.amount /= ratio;
+            }
+        }
+    }
+}
+
+fn apply_post_adj(bars: &mut [KlineBar]) {
+    if bars.is_empty() {
+        return;
+    }
+    let first_adj = bars.first().and_then(|b| b.adj_factor).unwrap_or(1.0);
+    if first_adj == 0.0 {
+        return;
+    }
+    for bar in bars.iter_mut() {
+        if let Some(factor) = bar.adj_factor {
+            if factor != 0.0 {
+                let ratio = factor / first_adj;
+                bar.open *= ratio;
+                bar.high *= ratio;
+                bar.low *= ratio;
+                bar.close *= ratio;
+                bar.pre_close = bar.pre_close.map(|v| v * ratio);
+                bar.volume /= ratio;
+                bar.amount /= ratio;
+            }
+        }
+    }
 }
 
 pub fn get_data_coverage(conn: &DuckConnection, stock_code: &str) -> AppResult<KlineCoverage> {

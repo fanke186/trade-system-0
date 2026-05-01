@@ -3,5 +3,7 @@ pub mod annotation;
 pub mod kline;
 pub mod provider;
 pub mod review;
+pub mod stock_meta;
 pub mod trade_system;
 pub mod watchlist;
+pub mod watchlist_ops;
