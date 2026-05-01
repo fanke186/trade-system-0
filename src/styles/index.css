@@ -3,21 +3,21 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
-  --background: 210 20% 98%;
-  --foreground: 222 24% 12%;
-  --panel: 0 0% 100%;
-  --panel-foreground: 222 24% 12%;
-  --muted: 210 20% 94%;
-  --muted-foreground: 215 11% 42%;
-  --accent: 201 90% 43%;
-  --accent-foreground: 0 0% 100%;
-  --border: 214 20% 86%;
-  --input: 214 20% 86%;
-  --ring: 201 90% 43%;
-  --success: 160 72% 34%;
-  --warning: 36 92% 48%;
-  --danger: 0 72% 51%;
+  color-scheme: dark;
+  --background: 233 18% 19%;
+  --foreground: 229 72% 88%;
+  --panel: 229 21% 13%;
+  --panel-foreground: 229 72% 88%;
+  --muted: 230 20% 19%;
+  --muted-foreground: 229 31% 45%;
+  --border: 230 28% 33%;
+  --input: 230 28% 33%;
+  --ring: 222 68% 72%;
+  --success: 103 42% 62%;
+  --warning: 34 62% 64%;
+  --danger: 347 83% 70%;
+  --info: 196 91% 75%;
+  --extra: 254 79% 82%;
 }
 
 * {
@@ -31,9 +31,17 @@ body {
   background: hsl(var(--background));
   color: hsl(var(--foreground));
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    'DM Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     sans-serif;
   letter-spacing: 0;
+}
+
+code,
+pre,
+.font-mono,
+kbd,
+samp {
+  font-family: 'DM Mono', ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, monospace;
 }
 
 button,
@@ -50,4 +58,3 @@ textarea {
 .kline-chart-host canvas {
   display: block;
 }
-

@@ -16,8 +16,8 @@ const config: Config = {
           foreground: 'hsl(var(--muted-foreground))'
         },
         accent: {
-          DEFAULT: 'hsl(var(--accent))',
-          foreground: 'hsl(var(--accent-foreground))'
+          DEFAULT: 'hsl(var(--ring))',
+          foreground: 'hsl(var(--panel))'
         },
         panel: {
           DEFAULT: 'hsl(var(--panel))',
@@ -25,10 +25,19 @@ const config: Config = {
         },
         success: 'hsl(var(--success))',
         warning: 'hsl(var(--warning))',
-        danger: 'hsl(var(--danger))'
+        danger: 'hsl(var(--danger))',
+        info: 'hsl(var(--info))',
+        extra: 'hsl(var(--extra))'
+      },
+      fontFamily: {
+        sans: ['"DM Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['"DM Mono"', 'ui-monospace', 'monospace']
       },
       boxShadow: {
-        focus: '0 0 0 2px hsl(var(--ring) / 0.25)'
+        focus: '0 0 0 2px hsl(var(--ring) / 0.25)',
+        glow: '0 0 8px hsl(var(--ring) / 0.35)',
+        'glow-success': '0 0 8px hsl(var(--success) / 0.35)',
+        'glow-danger': '0 0 8px hsl(var(--danger) / 0.35)'
       }
     }
   },
@@ -36,4 +45,3 @@ const config: Config = {
 }
 
 export default config
-
