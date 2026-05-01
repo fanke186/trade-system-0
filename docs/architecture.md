@@ -17,7 +17,8 @@
 ```text
 sync_kline    -> bars_1d -> aggregate bars_1w/bars_1M
 get_bars      -> DuckDB only（含复权参数 adj: pre|post|none）
-get_stock_meta -> securities(SQLite) + bars_1d(DuckDB) -> 最新价/涨跌/陈旧检测
+sync_securities_metadata -> eastmoney API -> securities(DuckDB, ~5000只A股)
+get_stock_meta -> securities(DuckDB) + bars_1d(DuckDB) -> 最新价/涨跌/陈旧检测
 score_stock   -> coverage -> get_bars summaries -> LLM -> stock_reviews
 ```
 
