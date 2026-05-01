@@ -4,18 +4,18 @@
 
 :root {
   color-scheme: dark;
-  --background: 233 18% 19%;
-  --foreground: 229 72% 88%;
-  --panel: 229 21% 13%;
-  --panel-foreground: 229 72% 88%;
-  --muted: 230 20% 19%;
-  --muted-foreground: 229 31% 45%;
-  --border: 230 28% 33%;
-  --input: 230 28% 33%;
-  --ring: 222 68% 72%;
-  --success: 103 42% 62%;
-  --warning: 34 62% 64%;
-  --danger: 347 83% 70%;
+  --background: 0 0% 5%;
+  --foreground: 0 0% 93%;
+  --panel: 0 0% 7%;
+  --panel-foreground: 0 0% 93%;
+  --muted: 0 0% 12%;
+  --muted-foreground: 0 0% 53%;
+  --border: 0 0% 16%;
+  --input: 0 0% 16%;
+  --ring: 217 91% 64%;
+  --success: 217 91% 64%;
+  --warning: 41 90% 56%;
+  --danger: 16 100% 60%;
   --info: 196 91% 75%;
   --extra: 254 79% 82%;
 }

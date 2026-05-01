@@ -36,8 +36,8 @@ const config: Config = {
       boxShadow: {
         focus: '0 0 0 2px hsl(var(--ring) / 0.25)',
         glow: '0 0 8px hsl(var(--ring) / 0.35)',
-        'glow-success': '0 0 8px hsl(var(--success) / 0.35)',
-        'glow-danger': '0 0 8px hsl(var(--danger) / 0.35)'
+        'glow-success': '0 0 8px hsl(var(--success) / 0.3)',
+        'glow-danger': '0 0 8px hsl(var(--danger) / 0.3)'
       }
     }
   },

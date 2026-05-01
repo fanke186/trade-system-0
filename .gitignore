@@ -20,3 +20,9 @@ trade-system-0-data/
 *.key
 secrets/
 
+# Visual brainstorming artifacts
+.superpowers/
+
+# Local reference files
+reference/
+

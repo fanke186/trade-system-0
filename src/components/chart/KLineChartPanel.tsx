@@ -49,8 +49,8 @@ export function KLineChartPanel({
     const chart = init(hostRef.current, {
       styles: {
         grid: {
-          horizontal: { color: '#e5e7eb' },
-          vertical: { color: '#edf2f7' }
+          horizontal: { color: '#2a2a2a' },
+          vertical: { color: '#262626' }
         },
         candle: {
           bar: {
