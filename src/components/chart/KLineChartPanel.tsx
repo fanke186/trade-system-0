@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
   init, dispose, registerLocale, registerIndicator,
   ActionType, IndicatorSeries, YAxisType, OverlayMode, LineType
@@ -6,6 +6,8 @@ import {
 import type { Chart, Crosshair } from 'klinecharts'
 import type { ChartAnnotation, ChartAnnotationPayload, KlineBar } from '../../lib/types'
 import { EmptyState } from '../shared/Panel'
+import { DrawingToolbar } from './DrawingToolbar'
+import { Magnifier } from './Magnifier'
 
 registerLocale('zh-CN', {
   time: '日期',
@@ -58,6 +60,18 @@ export function KLineChartPanel({
   onCrosshairBarRef.current = onCrosshairBar
   onCrosshairPositionRef.current = onCrosshairPosition
 
+  const lastDrawIdRef = useRef<string | null>(null)
+  const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null)
+  const [showDrawingToolbar, setShowDrawingToolbar] = useState(false)
+  const [toolbarPosition, setToolbarPosition] = useState({ x: 0, y: 0 })
+  const [showMagnifier, setShowMagnifier] = useState(false)
+  const [magnifierBar, setMagnifierBar] = useState<KlineBar | null>(null)
+  const overlayIdsRef = useRef<string[]>([])
+  const deltaHistoryRef = useRef<number[]>([])
+  const drawingToolRef = useRef(drawingTool)
+  drawingToolRef.current = drawingTool
+  const crosshairPositionRef = useRef<'top-left' | 'top-right'>('top-right')
+
   const chartData = useMemo(
     () =>
       bars.map(bar => ({
@@ -88,16 +102,20 @@ export function KLineChartPanel({
         },
         candle: {
           bar: {
-            upColor: '#0f9f6e',
-            downColor: '#dc2626',
+            upColor: 'rgba(220, 38, 38, 0.10)',
+            upBorderColor: '#dc2626',
+            upWickColor: '#dc2626',
+            downColor: '#0f9f6e',
+            downBorderColor: '#0f9f6e',
+            downWickColor: '#0f9f6e',
             noChangeColor: '#737373',
-            upBorderColor: '#0f9f6e',
-            downBorderColor: '#dc2626',
             noChangeBorderColor: '#737373',
-            upWickColor: '#0f9f6e',
-            downWickColor: '#dc2626',
             noChangeWickColor: '#737373'
           }
+        },
+        yAxis: {
+          inside: false,
+          tickText: { show: true, color: '#888888', size: 9 } as never
         }
       }
     }) as Chart | null
@@ -118,9 +136,31 @@ export function KLineChartPanel({
           : null
       onCrosshairBarRef.current?.(bar)
 
+      // Velocity tracking for magnifier
+      if (drawingToolRef.current && bar) {
+        const now = Date.now()
+        const delta = now - crosshairTimestampRef.current
+        crosshairTimestampRef.current = now
+        const hist = deltaHistoryRef.current
+        hist.push(delta)
+        if (hist.length > 3) hist.shift()
+        if (hist.length >= 3 && hist.every(d => d >= 300)) {
+          setShowMagnifier(true)
+          setMagnifierBar(bar)
+        } else {
+          setShowMagnifier(false)
+          setMagnifierBar(null)
+        }
+      } else {
+        setShowMagnifier(false)
+        setMagnifierBar(null)
+      }
+
       if (crosshair.realX != null && hostRef.current) {
         const mid = hostRef.current.clientWidth / 4
-        onCrosshairPositionRef.current?.(crosshair.realX < mid ? 'top-right' : 'top-left')
+        const pos = crosshair.realX < mid ? 'top-right' : 'top-left'
+        crosshairPositionRef.current = pos
+        onCrosshairPositionRef.current?.(pos)
       }
     })
 
@@ -149,7 +189,7 @@ export function KLineChartPanel({
   useEffect(() => {
     const chart = chartRef.current
     if (!chart || !drawingTool) return
-    chart.createOverlay?.(
+    const idResult = chart.createOverlay?.(
       {
         name: drawingTool === 'horizontal_line' ? 'priceLine' : 'rayLine',
         groupId: 'drawing',
@@ -157,7 +197,16 @@ export function KLineChartPanel({
         modeSensitivity: 8,
         onDrawEnd: (event: unknown) => {
           const payload = eventToPayload(event, drawingTool, latestBarsRef.current)
-          if (payload) onDrawComplete(payload)
+          if (payload) {
+            onDrawComplete(payload)
+            const overlayId = Array.isArray(idResult) ? (idResult[0] ?? null) : (idResult ?? null)
+            lastDrawIdRef.current = overlayId
+            if (overlayId) {
+              setSelectedOverlayId(overlayId)
+              setShowDrawingToolbar(true)
+              setToolbarPosition({ x: 100, y: 40 })
+            }
+          }
           return false
         }
       },
@@ -205,7 +254,7 @@ export function KLineChartPanel({
               lines: [{ color: ma.color, size: 1, style: LineType.Solid, smooth: false, dashedValue: [] }]
             }
           },
-          true
+          false
         )
       })
   }, [maLines, bars.length])
@@ -221,11 +270,66 @@ export function KLineChartPanel({
     })
   }, [coordType, bars.length])
 
+  // --- Magnifier: track crosshair velocity ---
+  const crosshairTimestampRef = useRef(0)
+  const originalOnCrosshairBarRef = useRef(onCrosshairBar)
+  originalOnCrosshairBarRef.current = onCrosshairBar
+
+  useEffect(() => {
+    if (!drawingTool) {
+      setShowMagnifier(false)
+      setMagnifierBar(null)
+    }
+  }, [drawingTool, bars.length])
+
+  // --- DrawingToolbar callbacks ---
+  const handleColorChange = useCallback(
+    (color: string) => {
+      if (!selectedOverlayId) return
+      const chart = chartRef.current
+      if (!chart) return
+      chart.overrideOverlay?.({ id: selectedOverlayId, styles: { line: { color } } } as never)
+    },
+    [selectedOverlayId]
+  )
+
+  const handleDeleteOverlay = useCallback(() => {
+    if (!selectedOverlayId) return
+    const chart = chartRef.current
+    if (!chart) return
+    chart.removeOverlay(selectedOverlayId)
+    setSelectedOverlayId(null)
+    setShowDrawingToolbar(false)
+  }, [selectedOverlayId])
+
+  const handleUndoOverlay = useCallback(() => {
+    handleDeleteOverlay()
+  }, [handleDeleteOverlay])
+
   if (bars.length === 0) {
-    return <EmptyState title="数据未就绪" detail="图表只读取本地 K 线库。请先在数据页显式同步。" />
+    return (
+      <div className="kline-chart-host w-full h-full flex items-center justify-center">
+        <EmptyState title="数据未就绪" detail="图表只读取本地 K 线库。请先在数据页显式同步。" />
+      </div>
+    )
   }
 
-  return <div ref={hostRef} className="kline-chart-host w-full h-full" />
+  return (
+    <div className="relative w-full h-full">
+      <div ref={hostRef} className="kline-chart-host w-full h-full" />
+      {showDrawingToolbar && selectedOverlayId && (
+        <DrawingToolbar
+          position={toolbarPosition}
+          onColorChange={handleColorChange}
+          onUndo={handleUndoOverlay}
+          onDelete={handleDeleteOverlay}
+        />
+      )}
+      {showMagnifier && magnifierBar && (
+        <Magnifier bar={magnifierBar} position={crosshairPositionRef.current || 'top-right'} />
+      )}
+    </div>
+  )
 }
 
 type OverlayEvent = {

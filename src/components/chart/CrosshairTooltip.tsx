@@ -9,8 +9,11 @@ export function CrosshairTooltip({
 }) {
   if (!bar) return null
 
-  const isUp = bar.close >= bar.open
-  const textColor = isUp ? 'text-success' : 'text-danger'
+  const prevClose = bar.preClose ?? bar.open
+  const closeVsPrev = bar.close - prevClose
+  const isUp = closeVsPrev >= 0
+  const textColor = isUp ? 'text-[#0f9f6e]' : 'text-[#dc2626]'
+  const changeColor = (bar.change ?? 0) >= 0 ? 'text-[#0f9f6e]' : 'text-[#dc2626]'
 
   const positionClass = position === 'top-right' ? 'right-2 top-2' : 'left-2 top-2'
 
@@ -24,7 +27,7 @@ export function CrosshairTooltip({
         <span className="text-right text-foreground">{bar.date}</span>
 
         <span className="text-muted-foreground">开盘</span>
-        <span className="text-right text-foreground">{bar.open.toFixed(2)}</span>
+        <span className={`text-right ${textColor}`}>{bar.open.toFixed(2)}</span>
 
         <span className="text-muted-foreground">最高</span>
         <span className={`text-right ${textColor}`}>{bar.high.toFixed(2)}</span>
@@ -36,17 +39,13 @@ export function CrosshairTooltip({
         <span className={`text-right ${textColor}`}>{bar.close.toFixed(2)}</span>
 
         <span className="text-muted-foreground">涨幅</span>
-        <span className={`text-right ${textColor}`}>
-          {bar.preClose
-            ? `${((bar.close - bar.preClose) / bar.preClose * 100).toFixed(2)}%`
-            : '-'}
+        <span className={`text-right ${changeColor}`}>
+          {bar.changePct != null ? `${bar.changePct > 0 ? '+' : ''}${bar.changePct.toFixed(2)}%` : bar.preClose ? `${((bar.close - bar.preClose) / bar.preClose * 100).toFixed(2)}%` : '-'}
         </span>
 
         <span className="text-muted-foreground">振幅</span>
         <span className="text-right text-foreground">
-          {bar.preClose
-            ? `${((bar.high - bar.low) / bar.preClose * 100).toFixed(2)}%`
-            : '-'}
+          {bar.amplitude != null ? `${bar.amplitude.toFixed(2)}%` : bar.preClose ? `${((bar.high - bar.low) / bar.preClose * 100).toFixed(2)}%` : '-'}
         </span>
 
         <span className="text-muted-foreground">成交量</span>

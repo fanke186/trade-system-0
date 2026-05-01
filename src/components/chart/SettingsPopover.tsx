@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { X } from 'lucide-react'
 import { cn } from '../../lib/cn'
 
 export type ChartSettings = {
@@ -71,22 +72,17 @@ export function SettingsPopover({
         <div className="mb-2 text-xs font-medium text-muted-foreground font-mono">均线设置</div>
         <div className="grid gap-1.5">
           {settings.maLines.map((line, i) => (
-            <label
-              key={line.period}
-              className="flex cursor-pointer items-center gap-2 text-xs text-foreground"
-            >
-              <input
-                type="checkbox"
-                checked={line.enabled}
-                onChange={() => toggleMa(i)}
-                className="h-3.5 w-3.5 accent-ring"
-              />
-              <span
-                className="inline-block h-2 w-2 rounded-full"
-                style={{ backgroundColor: line.color }}
-              />
-              <span className="font-mono">MA{line.period}</span>
-            </label>
+            <div key={line.period} className="flex items-center gap-2 text-xs text-foreground">
+              <label className="flex cursor-pointer items-center gap-2 flex-1 min-w-0">
+                <input type="checkbox" checked={line.enabled} onChange={() => toggleMa(i)} className="h-3.5 w-3.5 accent-ring" />
+                <span className="inline-block h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: line.color }} />
+                <span className="font-mono">MA{line.period}</span>
+              </label>
+              <button onClick={(e) => { e.preventDefault(); onChange({ ...settings, maLines: settings.maLines.filter((_, j) => j !== i) }); }}
+                      className="text-muted-foreground hover:text-danger transition shrink-0" title="删除">
+                <X className="h-3 w-3" />
+              </button>
+            </div>
           ))}
         </div>
       </div>
