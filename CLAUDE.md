@@ -39,13 +39,15 @@ Tauri 2 桌面应用，帮助用户构建个人交易系统并生成专属 AI Ag
 ## 项目结构
 
 ```
-src/                      # React + TypeScript 前端
-src-tauri/src/commands/   # Tauri command IPC 层
-src-tauri/src/services/   # 业务编排层
-src-tauri/src/db/         # SQLite 应用状态 + DuckDB K 线
-src-tauri/src/kline/      # K 线 Provider、sample fallback、聚合
-src-tauri/src/llm/        # OpenAI-compatible 客户端、Prompt、JSON guard
-src-tauri/src/models/     # 数据模型
+src/                         # React + TypeScript 前端
+src/components/chart/        # K 线图表、工具栏、设置面板
+src/components/watchlist/    # 自选侧栏、股票信息面板
+src-tauri/src/commands/      # Tauri command IPC 层
+src-tauri/src/services/      # 业务编排层
+src-tauri/src/db/            # SQLite 应用状态 + DuckDB K 线
+src-tauri/src/kline/         # K 线 Provider、sample fallback、聚合
+src-tauri/src/llm/           # OpenAI-compatible 客户端、Prompt、JSON guard
+src-tauri/src/models/        # 数据模型
 ```
 
 ## 数据边界
@@ -53,6 +55,7 @@ src-tauri/src/models/     # 数据模型
 ```
 sync_kline -> bars_1d -> aggregate bars_1w/bars_1M
 get_bars   -> DuckDB only（只读，不触发下载）
+get_stock_meta -> securities (SQLite) + bars_1d (DuckDB) -> 最新价/涨跌/陈旧检测
 score_stock -> coverage check -> get_bars -> LLM -> stock_reviews
 ```
 
@@ -69,3 +72,5 @@ cd src-tauri && cargo test         # Rust 测试
 
 - `docs/trading-system-template.md` — **交易系统模板**（SSOT），定义通用交易系统的三层13章骨架。AI Agent 据此模板引导用户填写、检测缺口、触发追问。
 - `docs/reference/trend-trader/` 目录存放 trend-trader 项目的原始设计文档，**不是当前系统的设计文档**，仅供参考。该目录下的 README.md 有详细说明。
+- `docs/superpowers/specs/2026-05-01-my-watchlist-design.md` — **我的自选**功能设计文档。
+- `docs/superpowers/specs/2026-05-01-ui-redesign-design.md` — UI 重设计规范文档。
