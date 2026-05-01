@@ -31,4 +31,3 @@ pub fn delete_chart_annotation(
     let conn = state.sqlite.lock().expect("sqlite lock");
     annotation_service::delete_chart_annotation(&conn, &annotation_id)
 }
-

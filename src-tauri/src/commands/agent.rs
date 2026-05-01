@@ -22,4 +22,3 @@ pub async fn run_agent_chat(
 ) -> AppResult<AgentChatResult> {
     agent_service::run_agent_chat(&state, agent_id, messages).await
 }
-

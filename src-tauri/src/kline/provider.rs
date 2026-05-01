@@ -25,4 +25,3 @@ pub trait KlineProvider {
         end_date: NaiveDate,
     ) -> AppResult<Vec<DailyBar>>;
 }
-

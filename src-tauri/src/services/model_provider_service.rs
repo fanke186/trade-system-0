@@ -152,7 +152,10 @@ pub fn set_active_model_provider(conn: &Connection, provider_id: &str) -> AppRes
     Ok(redact_provider(get_provider(conn, provider_id)?))
 }
 
-pub async fn test_model_provider(state: &AppState, provider_id: &str) -> AppResult<ProviderTestResult> {
+pub async fn test_model_provider(
+    state: &AppState,
+    provider_id: &str,
+) -> AppResult<ProviderTestResult> {
     let provider = {
         let conn = state.sqlite.lock().expect("sqlite lock");
         get_provider(&conn, provider_id)?
@@ -242,7 +245,8 @@ fn write_local_secret(app_dir: &Path, provider_id: &str, api_key: &str) -> AppRe
 }
 
 fn read_local_secret(app_dir: &Path, provider_id: &str) -> AppResult<String> {
-    let encoded = std::fs::read_to_string(app_dir.join("secrets").join(format!("{}.key", provider_id)))?;
+    let encoded =
+        std::fs::read_to_string(app_dir.join("secrets").join(format!("{}.key", provider_id)))?;
     let encrypted = base64::engine::general_purpose::STANDARD
         .decode(encoded.trim())
         .map_err(|error| {
@@ -275,4 +279,3 @@ fn xor_crypt(input: &[u8], key_material: &[u8]) -> Vec<u8> {
         .map(|(index, byte)| byte ^ key[index % key.len()])
         .collect()
 }
-

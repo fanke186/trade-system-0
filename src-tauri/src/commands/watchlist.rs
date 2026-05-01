@@ -39,4 +39,3 @@ pub fn remove_watchlist_item(
     let conn = state.sqlite.lock().expect("sqlite lock");
     watchlist_service::remove_watchlist_item(&conn, watchlist_id, stock_code)
 }
-

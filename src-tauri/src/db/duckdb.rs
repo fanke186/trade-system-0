@@ -114,4 +114,3 @@ fn seed_defaults(conn: &DuckConnection) -> AppResult<()> {
     }
     Ok(())
 }
-

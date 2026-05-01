@@ -55,4 +55,3 @@ pub fn aggregate_kline(
     let conn = state.duckdb.lock().expect("duckdb lock");
     kline_sync_service::aggregate_kline(&conn, stock_code, &frequency)
 }
-

@@ -85,7 +85,10 @@ pub fn save_chart_annotation(
 }
 
 pub fn delete_chart_annotation(conn: &Connection, annotation_id: &str) -> AppResult<OkResult> {
-    conn.execute("delete from chart_annotations where id = ?1", params![annotation_id])?;
+    conn.execute(
+        "delete from chart_annotations where id = ?1",
+        params![annotation_id],
+    )?;
     Ok(OkResult { ok: true })
 }
 
@@ -117,4 +120,3 @@ fn annotation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChartAnnotat
         updated_at: row.get(8)?,
     })
 }
-

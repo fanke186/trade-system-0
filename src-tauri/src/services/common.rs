@@ -23,4 +23,3 @@ pub fn bool_to_int(value: bool) -> i64 {
         0
     }
 }
-

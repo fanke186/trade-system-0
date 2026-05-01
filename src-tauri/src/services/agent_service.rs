@@ -58,7 +58,8 @@ pub fn get_agent(conn: &Connection, agent_id: &str) -> AppResult<Agent> {
                 name: row.get(3)?,
                 model_provider_id: row.get(4)?,
                 system_prompt: row.get(5)?,
-                output_schema_json: serde_json::from_str(&schema_json).unwrap_or_else(|_| serde_json::json!({})),
+                output_schema_json: serde_json::from_str(&schema_json)
+                    .unwrap_or_else(|_| serde_json::json!({})),
                 created_at: row.get(7)?,
                 updated_at: row.get(8)?,
             })
@@ -106,4 +107,3 @@ pub async fn run_agent_chat(
         raw_json: None,
     })
 }
-

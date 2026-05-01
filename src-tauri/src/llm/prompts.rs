@@ -83,4 +83,3 @@ annotations:
         serde_json::to_string_pretty(annotations).unwrap_or_else(|_| "[]".to_string()),
     )
 }
-

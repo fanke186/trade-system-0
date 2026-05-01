@@ -155,4 +155,3 @@ fn frequency_table(frequency: &str) -> AppResult<&'static str> {
         )),
     }
 }
-

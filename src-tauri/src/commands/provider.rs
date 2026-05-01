@@ -35,4 +35,3 @@ pub async fn test_model_provider(
 ) -> AppResult<ProviderTestResult> {
     model_provider_service::test_model_provider(&state, &provider_id).await
 }
-

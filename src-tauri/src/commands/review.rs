@@ -32,4 +32,3 @@ pub async fn run_daily_review(
 ) -> AppResult<DailyReviewRun> {
     review_service::run_daily_review(&state, watchlist_id, trade_system_version_id).await
 }
-

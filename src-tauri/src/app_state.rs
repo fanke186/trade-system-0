@@ -14,7 +14,14 @@ pub struct AppState {
 impl AppState {
     pub fn initialize(app_dir: PathBuf) -> AppResult<Self> {
         std::fs::create_dir_all(&app_dir)?;
-        for child in ["materials", "exports", "logs", "backup", "cache/provider", "secrets"] {
+        for child in [
+            "materials",
+            "exports",
+            "logs",
+            "backup",
+            "cache/provider",
+            "secrets",
+        ] {
             std::fs::create_dir_all(app_dir.join(child))?;
         }
 
@@ -36,4 +43,3 @@ impl AppState {
         })
     }
 }
-

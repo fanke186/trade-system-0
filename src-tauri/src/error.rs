@@ -102,4 +102,3 @@ impl From<anyhow::Error> for AppError {
         )
     }
 }
-

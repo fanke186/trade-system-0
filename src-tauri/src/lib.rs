@@ -13,12 +13,18 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let app_dir = app
-                .path()
-                .app_data_dir()
-                .unwrap_or_else(|_| std::env::current_dir().expect("current dir").join("trade-system-0-data"));
-            let state = AppState::initialize(app_dir)
-                .map_err(|err| anyhow::anyhow!("{}: {}", err.code, err.message))?;
+            let app_dir = app.path().app_data_dir().unwrap_or_else(|_| {
+                std::env::current_dir()
+                    .expect("current dir")
+                    .join("trade-system-0-data")
+            });
+            let state = AppState::initialize(app_dir).map_err(|err| {
+                anyhow::anyhow!(
+                    "{}",
+                    serde_json::to_string_pretty(&err)
+                        .unwrap_or_else(|_| format!("{}: {}", err.code, err.message))
+                )
+            })?;
             app.manage(state);
             Ok(())
         })

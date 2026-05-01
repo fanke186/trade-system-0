@@ -68,4 +68,3 @@ pub fn export_trade_system_version(
     let conn = state.sqlite.lock().expect("sqlite lock");
     trade_system_service::export_version(&conn, &version_id, &target_path)
 }
-

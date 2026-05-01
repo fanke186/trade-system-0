@@ -165,4 +165,3 @@ fn seed_defaults(conn: &Connection) -> AppResult<()> {
     }
     Ok(())
 }
-

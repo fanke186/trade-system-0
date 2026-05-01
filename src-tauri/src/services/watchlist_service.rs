@@ -4,7 +4,9 @@ use crate::services::common::{new_id, now_iso};
 use rusqlite::{params, Connection};
 
 pub fn list_watchlists(conn: &Connection) -> AppResult<Vec<Watchlist>> {
-    let mut stmt = conn.prepare("select id, name, created_at, updated_at from watchlists order by updated_at desc")?;
+    let mut stmt = conn.prepare(
+        "select id, name, created_at, updated_at from watchlists order by updated_at desc",
+    )?;
     let rows = stmt.query_map([], |row| {
         Ok(Watchlist {
             id: row.get(0)?,
@@ -108,4 +110,3 @@ pub fn list_items(conn: &Connection, watchlist_id: &str) -> AppResult<Vec<Watchl
     }
     Ok(values)
 }
-
