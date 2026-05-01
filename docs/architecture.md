@@ -1,6 +1,6 @@
 # trade-system-0 MVP Architecture
 
-本仓库按 `/Users/yaya/me/workspace/trend-trader/docs/technical-implementation.md` 落地。实现保留文档中的模块边界：
+本仓库设计时参考了 trend-trader 的实现文档（见 `docs/reference/trend-trader/`）。实现保留文档中的模块边界：
 
 - `src/`：React + TypeScript + Vite 前端。
 - `src-tauri/src/commands/`：Tauri command IPC 层。
