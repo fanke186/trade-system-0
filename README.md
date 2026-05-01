@@ -49,3 +49,12 @@ trade-system-0-data/
 - 自选股票池与每日复盘编排。
 - KLineChart 图表、日/周/月切换、横线/射线标注保存。
 
+## 关键文档
+
+| 文档 | 说明 |
+|------|------|
+| `docs/architecture.md` | 系统架构与模块边界 |
+| `docs/trading-system-template.md` | 通用交易系统模板（三层13章骨架），AI Agent 据此引导用户构建交易系统 |
+| `docs/reference/trend-trader/` | trend-trader 参考文档（只读，非当前系统设计） |
+| `.claude/skills/` | 项目级 Claude Code 自定义 skill |
+
