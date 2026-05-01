@@ -15,6 +15,7 @@ import type {
   ProviderTestResult,
   SaveModelProviderInput,
   Security,
+  StockMeta,
   StockReview,
   TradeSystemDetail,
   TradeSystemDraft,
@@ -83,14 +84,11 @@ export const commands = {
     frequency: '1d' | '1w' | '1M',
     startDate?: string,
     endDate?: string,
-    limit?: number
+    limit?: number,
+    adj?: 'pre' | 'post' | 'none'
   ) =>
     call<KlineBar[]>('get_bars', {
-      stockCode,
-      frequency,
-      startDate,
-      endDate,
-      limit
+      stockCode, frequency, startDate, endDate, limit, adj
     }),
   getDataCoverage: (stockCode: string) =>
     call<KlineCoverage>('get_data_coverage', { stockCode }),
@@ -131,6 +129,24 @@ export const commands = {
       watchlistId,
       stockCode
     }),
+
+  getStockMeta: (stockCode: string) =>
+    call<StockMeta>('get_stock_meta', { stockCode }),
+
+  reorderWatchlistItem: (itemId: string, position: 'top' | 'bottom') =>
+    call<null>('reorder_watchlist_item', { itemId, position }),
+
+  moveWatchlistItem: (itemId: string, targetWatchlistId: string) =>
+    call<null>('move_watchlist_item', { itemId, targetWatchlistId }),
+
+  createWatchlistGroup: (name: string) =>
+    call<string>('create_watchlist_group', { name }),
+
+  deleteWatchlistGroup: (watchlistId: string) =>
+    call<null>('delete_watchlist_group', { watchlistId }),
+
+  renameWatchlistGroup: (watchlistId: string, newName: string) =>
+    call<null>('rename_watchlist_group', { watchlistId, newName }),
 
   listChartAnnotations: (stockCode: string, tradeSystemVersionId?: string | null) =>
     call<ChartAnnotation[]>('list_chart_annotations', {

@@ -1,30 +1,62 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { init, dispose } from 'klinecharts'
+import {
+  init, dispose, registerLocale, registerIndicator,
+  ActionType, IndicatorSeries, YAxisType, OverlayMode, LineType
+} from 'klinecharts'
+import type { Chart, Crosshair } from 'klinecharts'
 import type { ChartAnnotation, ChartAnnotationPayload, KlineBar } from '../../lib/types'
 import { EmptyState } from '../shared/Panel'
 
-type ChartApi = {
-  applyNewData: (data: unknown[]) => void
-  createIndicator?: (...args: unknown[]) => unknown
-  createOverlay?: (overlay: unknown) => unknown
-  removeOverlay?: (filter?: unknown) => unknown
-  setStyles?: (styles: unknown) => void
-}
+registerLocale('zh-CN', {
+  time: '日期',
+  open: '开盘',
+  high: '最高',
+  low: '最低',
+  close: '收盘',
+  volume: '成交量',
+  change: '涨幅',
+  turnover: '成交额'
+})
+
+registerIndicator({
+  name: 'AMOUNT',
+  shortName: 'AMOUNT',
+  series: IndicatorSeries.Volume,
+  calc: (dataList: Array<Record<string, unknown>>) =>
+    dataList.map(k => ({ amount: (k.turnover as number) || 0 })),
+  figures: [{ key: 'amount', title: '成交额', type: 'bar' }]
+})
 
 export function KLineChartPanel({
   bars,
   annotations,
   drawingTool,
-  onDrawComplete
+  onDrawComplete,
+  subChartType,
+  maLines,
+  coordType,
+  onCrosshairBar,
+  onCrosshairPosition
 }: {
   bars: KlineBar[]
   annotations: ChartAnnotation[]
   drawingTool: 'horizontal_line' | 'ray' | null
   onDrawComplete: (payload: ChartAnnotationPayload) => void
+  subChartType?: 'volume' | 'amount'
+  maLines?: Array<{ period: number; color: string; enabled: boolean }>
+  coordType?: 'normal' | 'log'
+  onCrosshairBar?: (bar: KlineBar | null) => void
+  onCrosshairPosition?: (pos: 'top-left' | 'top-right') => void
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null)
-  const chartRef = useRef<ChartApi | null>(null)
+  const chartRef = useRef<Chart | null>(null)
   const latestBarsRef = useRef<KlineBar[]>(bars)
+  const subPaneIdRef = useRef<string | null>(null)
+  const onCrosshairBarRef = useRef(onCrosshairBar)
+  const onCrosshairPositionRef = useRef(onCrosshairPosition)
+
+  onCrosshairBarRef.current = onCrosshairBar
+  onCrosshairPositionRef.current = onCrosshairPosition
 
   const chartData = useMemo(
     () =>
@@ -44,9 +76,11 @@ export function KLineChartPanel({
     latestBarsRef.current = bars
   }, [bars])
 
+  // Chart initialization + crosshair subscription
   useEffect(() => {
     if (!hostRef.current || bars.length === 0) return
     const chart = init(hostRef.current, {
+      locale: 'zh-CN',
       styles: {
         grid: {
           horizontal: { color: '#2a2a2a' },
@@ -66,15 +100,40 @@ export function KLineChartPanel({
           }
         }
       }
-    }) as ChartApi
+    }) as Chart | null
+    if (!chart) return
     chartRef.current = chart
-    chart.createIndicator?.('VOL', false, { height: 120 })
+    subPaneIdRef.current = null
+
+    chart.subscribeAction(ActionType.OnCrosshairChange, (data: unknown) => {
+      const crosshair = data as Crosshair | undefined
+      if (!crosshair || crosshair.dataIndex == null || crosshair.dataIndex < 0) {
+        onCrosshairBarRef.current?.(null)
+        return
+      }
+      const idx = crosshair.realDataIndex ?? crosshair.dataIndex
+      const bar =
+        idx != null && idx >= 0 && idx < latestBarsRef.current.length
+          ? latestBarsRef.current[idx]
+          : null
+      onCrosshairBarRef.current?.(bar)
+
+      if (crosshair.realX != null && hostRef.current) {
+        const mid = hostRef.current.clientWidth / 4
+        onCrosshairPositionRef.current?.(crosshair.realX < mid ? 'top-right' : 'top-left')
+      }
+    })
+
     return () => {
+      chart.unsubscribeAction(ActionType.OnCrosshairChange)
       chartRef.current = null
+      subPaneIdRef.current = null
       if (hostRef.current) dispose(hostRef.current)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bars.length])
 
+  // Apply data and annotations
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
@@ -86,27 +145,93 @@ export function KLineChartPanel({
     })
   }, [annotations, chartData])
 
+  // Drawing tool
   useEffect(() => {
     const chart = chartRef.current
     if (!chart || !drawingTool) return
-    chart.createOverlay?.({
-      name: drawingTool === 'horizontal_line' ? 'priceLine' : 'rayLine',
-      groupId: 'drawing',
-      paneId: 'candle_pane',
-      mode: 'weak_magnet',
-      modeSensitivity: 8,
-      onDrawEnd: (event: unknown) => {
-        const payload = eventToPayload(event, drawingTool, latestBarsRef.current)
-        if (payload) onDrawComplete(payload)
+    chart.createOverlay?.(
+      {
+        name: drawingTool === 'horizontal_line' ? 'priceLine' : 'rayLine',
+        groupId: 'drawing',
+        mode: OverlayMode.WeakMagnet,
+        modeSensitivity: 8,
+        onDrawEnd: (event: unknown) => {
+          const payload = eventToPayload(event, drawingTool, latestBarsRef.current)
+          if (payload) onDrawComplete(payload)
+          return false
+        }
+      },
+      'candle_pane'
+    )
+  }, [drawingTool, onDrawComplete])
+
+  // Sub-chart indicator (VOL / AMOUNT)
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+
+    if (subPaneIdRef.current) {
+      try {
+        chart.removeIndicator(subPaneIdRef.current)
+      } catch {
+        /* ignore */
+      }
+      subPaneIdRef.current = null
+    }
+
+    const name = subChartType === 'amount' ? 'AMOUNT' : 'VOL'
+    const paneId = chart.createIndicator(name, false, { height: 120 })
+    subPaneIdRef.current = paneId ?? null
+  }, [subChartType, bars.length])
+
+  // MA overlay
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+
+    const existing = chart.getIndicatorByPaneId?.('candle_pane', 'MA')
+    if (existing) {
+      chart.removeIndicator('candle_pane', 'MA')
+    }
+
+    ;(maLines ?? [])
+      .filter(ma => ma.enabled)
+      .forEach(ma => {
+        chart.createIndicator?.(
+          {
+            name: 'MA',
+            calcParams: [ma.period],
+            styles: {
+              lines: [{ color: ma.color, size: 1, style: LineType.Solid, smooth: false, dashedValue: [] }]
+            }
+          },
+          true
+        )
+      })
+  }, [maLines, bars.length])
+
+  // Log coordinate
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+    chart.setStyles?.({
+      yAxis: {
+        type: coordType === 'log' ? YAxisType.Log : YAxisType.Normal
       }
     })
-  }, [drawingTool, onDrawComplete])
+  }, [coordType, bars.length])
 
   if (bars.length === 0) {
     return <EmptyState title="数据未就绪" detail="图表只读取本地 K 线库。请先在数据页显式同步。" />
   }
 
-  return <div ref={hostRef} className="kline-chart-host h-[560px] w-full border border-border bg-panel" />
+  return <div ref={hostRef} className="kline-chart-host w-full h-full" />
+}
+
+type OverlayEvent = {
+  overlay?: {
+    points?: Array<{ timestamp?: number; value?: number }>
+  }
 }
 
 function annotationToOverlay(annotation: ChartAnnotation) {
@@ -150,8 +275,7 @@ function eventToPayload(
   drawingTool: 'horizontal_line' | 'ray',
   bars: KlineBar[]
 ): ChartAnnotationPayload | null {
-  const points = (event as { overlay?: { points?: Array<{ timestamp?: number; value?: number }> } })
-    ?.overlay?.points
+  const points = (event as OverlayEvent)?.overlay?.points
   if (!points || points.length === 0) return null
 
   if (drawingTool === 'horizontal_line') {
@@ -196,4 +320,3 @@ function nearestHighLow(price: number | undefined, bar: KlineBar) {
   if (Math.abs(price - bar.low) <= threshold) return 'low'
   return undefined
 }
-

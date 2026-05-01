@@ -20,11 +20,24 @@ vi.mock('@tauri-apps/api/core', () => ({
         })
       case 'get_stock_reviews':
       case 'list_watchlists':
-        return Promise.resolve([])
+      case 'get_stock_meta':
+        return Promise.resolve(null)
       default:
         return Promise.resolve(null)
     }
   })
+}))
+
+vi.mock('klinecharts', () => ({
+  init: vi.fn(() => null),
+  dispose: vi.fn(),
+  registerLocale: vi.fn(),
+  registerIndicator: vi.fn(),
+  ActionType: { OnCrosshairChange: 'onCrosshairChange' },
+  IndicatorSeries: { Volume: 'volume' },
+  YAxisType: { Log: 'log', Normal: 'normal' },
+  OverlayMode: { WeakMagnet: 'weak_magnet' },
+  LineType: { Solid: 'solid' }
 }))
 
 describe('App', () => {
@@ -39,6 +52,6 @@ describe('App', () => {
     )
 
     expect(await screen.findByText('trade-system-0')).toBeInTheDocument()
-    expect(screen.getAllByText('每日复盘').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('我的自选').length).toBeGreaterThan(0)
   })
 })

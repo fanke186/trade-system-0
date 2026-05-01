@@ -257,3 +257,17 @@ export type ChartAnnotationPayload =
 export type OkResult = {
   ok: boolean
 }
+
+export type StockMeta = {
+  code: string
+  name: string
+  exchange: string
+  board?: string | null
+  listDate?: string | null
+  latestPrice?: number | null
+  preClose?: number | null
+  change?: number | null
+  changePct?: number | null
+  latestDate?: string | null
+  stale: boolean
+}

@@ -4,7 +4,7 @@ import { routes, type PageId } from '../../app/routes'
 import type { KlineCoverage, ModelProvider, StockReview, TradeSystemSummary } from '../../lib/types'
 import { cn } from '../../lib/cn'
 import { Badge } from '../shared/Badge'
-import { formatDateTime, formatRows, jsonPreview } from '../../lib/format'
+import { formatRows, jsonPreview } from '../../lib/format'
 
 export function AppShell({
   activePage,
@@ -96,15 +96,6 @@ export function AppShell({
             {stockCode || '-'}
           </div>
         </div>
-        <div className="border-b border-border px-4 py-3">
-          <div className="text-xs font-medium text-muted-foreground font-mono">K 线覆盖</div>
-          <dl className="mt-2 grid gap-1 text-xs">
-            <ContextRow label="日 K" value={coverageText(coverage?.daily)} />
-            <ContextRow label="周 K" value={coverageText(coverage?.weekly)} />
-            <ContextRow label="月 K" value={coverageText(coverage?.monthly)} />
-            <ContextRow label="最近同步" value={formatDateTime(coverage?.lastSyncAt)} />
-          </dl>
-        </div>
         <div className="px-4 py-3">
           <div className="text-xs font-medium text-muted-foreground font-mono">最近评分</div>
           {latestReview ? (
@@ -129,16 +120,3 @@ export function AppShell({
   )
 }
 
-function ContextRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="truncate text-right font-mono text-foreground">{value}</dd>
-    </div>
-  )
-}
-
-function coverageText(item?: KlineCoverage['daily']) {
-  if (!item || item.rows === 0) return '无数据'
-  return `${item.startDate ?? '-'} 至 ${item.endDate ?? '-'} (${formatRows(item.rows)})`
-}

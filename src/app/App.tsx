@@ -7,13 +7,12 @@ import { DailyReviewPage } from '../pages/DailyReviewPage'
 import { TradeSystemPage } from '../pages/TradeSystemPage'
 import { AgentPage } from '../pages/AgentPage'
 import { StockReviewPage } from '../pages/StockReviewPage'
-import { ChartPage } from '../pages/ChartPage'
-import { WatchlistPage } from '../pages/WatchlistPage'
+import { MyWatchlistPage } from '../pages/MyWatchlistPage'
 import { DataPage } from '../pages/DataPage'
 import { SettingsPage } from '../pages/SettingsPage'
 
 export function App() {
-  const [activePage, setActivePage] = useState<PageId>('daily-review')
+  const [activePage, setActivePage] = useState<PageId>('my-watchlist')
   const [stockCode, setStockCode] = useState('002261')
   const [selectedVersionId, setSelectedVersionId] = useState<string | undefined>()
 
@@ -66,14 +65,13 @@ export function App() {
         onStockCodeChange={setStockCode}
       />
     ),
-    chart: (
-      <ChartPage
+    'my-watchlist': (
+      <MyWatchlistPage
         selectedVersionId={activeVersionId}
         stockCode={stockCode}
         onStockCodeChange={setStockCode}
       />
     ),
-    watchlist: <WatchlistPage onStockCodeChange={setStockCode} />,
     data: <DataPage stockCode={stockCode} onStockCodeChange={setStockCode} />,
     settings: <SettingsPage />
   } satisfies Record<PageId, ReactElement>
