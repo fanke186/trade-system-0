@@ -9,6 +9,33 @@ Tauri 2 桌面应用，帮助用户构建个人交易系统并生成专属 AI Ag
 - MVP 只实现日 K、周 K、月 K，不接入分钟线、实时行情或交易执行。
 - 所有设计决策以当前项目代码和 `docs/architecture.md` 为准。
 
+## 设计规范
+
+**方向：** 工业终端风 — 暗色、高对比、数据密度优先，每个像素都在传递信息。
+
+**配色：**
+- 背景 `#0d0d0d`（纯黑），面板 `#121212`，边框 `#2a2a2a`
+- 主题色/买入/成功 `#4d90fe`（蓝），卖出/危险 `#ff6b35`（橙红），观望 `#f0b93b`（琥珀）
+- CSS 变量统一定义在 `src/styles/index.css`，Tailwind 引用变量名
+
+**字体：**
+- 数据/标签/代码/输入框 → DM Mono（等宽）
+- 正文/中文 → DM Sans（无衬线）
+- 通过 `font-mono` / `font-sans` Tailwind class 使用，不直接写 font-family
+
+**组件风格：**
+- Badge：无边框实心色块（`bg-<color>/20 text-<color>`），小写 mono 字体
+- Button：直角、hover 时边框变亮 + `shadow-glow`
+- Input/Select：底部单下划线，focus 时加宽至 2px 并变色。无四边框
+- Panel：`border-border bg-panel`，标题用 mono 字体
+- DataTable：表头 bg-panel + mono，tbody bg-background
+
+**动效：** 150ms transition，页面淡入，button hover glow，input/select focus 底线加宽动画
+
+**KLineChart：** 网格线用暗灰 `#2a2a2a`/`#262626`，蜡烛图保持红涨绿跌默认
+
+**新增模块、组件、页面必须遵守以上规范。** 设计文档见 `docs/superpowers/specs/2026-05-01-ui-redesign-design.md`。
+
 ## 项目结构
 
 ```
