@@ -22,9 +22,11 @@ pub fn import_material(
         .and_then(|ext| ext.to_str())
         .unwrap_or("")
         .to_lowercase();
-    let target = app_dir
-        .join("materials")
-        .join(format!("{}_{}", material_id, sanitize_file_name(&file_name)));
+    let target = app_dir.join("materials").join(format!(
+        "{}_{}",
+        material_id,
+        sanitize_file_name(&file_name)
+    ));
     std::fs::copy(&source, &target)?;
 
     let (mime_type, extracted_text, parse_status, parse_error) = match extension.as_str() {
@@ -43,9 +45,12 @@ pub fn import_material(
         "pdf" => {
             let bytes = std::fs::read(&target)?;
             match pdf_extract::extract_text_from_mem(&bytes) {
-                Ok(text) if !text.trim().is_empty() => {
-                    (Some("application/pdf".to_string()), Some(text), "ok".to_string(), None)
-                }
+                Ok(text) if !text.trim().is_empty() => (
+                    Some("application/pdf".to_string()),
+                    Some(text),
+                    "ok".to_string(),
+                    None,
+                ),
                 Ok(_) => (
                     Some("application/pdf".to_string()),
                     None,
@@ -112,4 +117,3 @@ fn sanitize_file_name(name: &str) -> String {
         })
         .collect()
 }
-

@@ -67,7 +67,11 @@ pub async fn call_model(
     let value: serde_json::Value = response.json().await?;
     if !status.is_success() {
         return Err(AppError::with_detail(
-            if status.as_u16() == 401 { "provider_auth_failed" } else { "provider_request_failed" },
+            if status.as_u16() == 401 {
+                "provider_auth_failed"
+            } else {
+                "provider_request_failed"
+            },
             "模型 Provider 返回错误",
             true,
             serde_json::json!({ "status": status.as_u16(), "response": value }),
@@ -96,4 +100,3 @@ fn completion_url(base_url: &str) -> String {
         format!("{}/chat/completions", trimmed)
     }
 }
-

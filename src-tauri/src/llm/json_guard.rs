@@ -24,7 +24,9 @@ pub fn parse_and_validate_stock_review(content: &str) -> AppResult<Value> {
 
     if let Some(score) = value.get("score") {
         if !score.is_null() {
-            let score = score.as_i64().ok_or_else(|| invalid("score 必须是整数或 null"))?;
+            let score = score
+                .as_i64()
+                .ok_or_else(|| invalid("score 必须是整数或 null"))?;
             if !(0..=100).contains(&score) {
                 return Err(invalid("score 必须在 0-100"));
             }
@@ -51,8 +53,16 @@ pub fn parse_and_validate_stock_review(content: &str) -> AppResult<Value> {
         }
     }
 
-    for key in ["overall_evaluation", "evidence", "chart_annotations", "uncertainty"] {
-        if !value.as_object().is_some_and(|object| object.contains_key(key)) {
+    for key in [
+        "overall_evaluation",
+        "evidence",
+        "chart_annotations",
+        "uncertainty",
+    ] {
+        if !value
+            .as_object()
+            .is_some_and(|object| object.contains_key(key))
+        {
             return Err(invalid(format!("缺少 {}", key)));
         }
     }

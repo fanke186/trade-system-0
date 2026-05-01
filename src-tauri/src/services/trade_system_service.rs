@@ -5,7 +5,6 @@ use crate::models::{
 };
 use crate::services::common::{new_id, now_iso, sha256_hex};
 use rusqlite::{params, Connection, OptionalExtension};
-use serde_json::Value;
 use std::path::Path;
 
 pub fn list_trade_systems(conn: &Connection) -> AppResult<Vec<TradeSystemSummary>> {
@@ -61,7 +60,10 @@ pub fn get_trade_system(conn: &Connection, trade_system_id: &str) -> AppResult<T
     Ok(detail)
 }
 
-pub fn list_versions(conn: &Connection, trade_system_id: &str) -> AppResult<Vec<TradeSystemVersion>> {
+pub fn list_versions(
+    conn: &Connection,
+    trade_system_id: &str,
+) -> AppResult<Vec<TradeSystemVersion>> {
     let mut stmt = conn.prepare(
         r#"
         select id, trade_system_id, version, markdown, content_hash, completeness_status,
@@ -115,16 +117,25 @@ pub fn check_completeness(markdown: &str) -> CompletenessReport {
     let normalized = markdown.to_lowercase();
     let checks: [(&str, &[&str]); 6] = [
         ("系统定位", &["系统定位", "交易系统定位", "定位"]),
-        ("数据需求", &["数据需求", "k 线", "k线", "日 k", "周 k", "月 k"]),
+        (
+            "数据需求",
+            &["数据需求", "k 线", "k线", "日 k", "周 k", "月 k"],
+        ),
         ("入选条件", &["入选条件", "选股条件", "入池", "筛选"]),
         ("评分规则", &["评分规则", "评分", "权重", "分值"]),
-        ("交易计划规则", &["交易计划", "入场", "止损", "止盈", "不交易"]),
+        (
+            "交易计划规则",
+            &["交易计划", "入场", "止损", "止盈", "不交易"],
+        ),
         ("复盘输出格式", &["复盘输出", "输出格式", "json", "评价"]),
     ];
 
     let mut missing = Vec::new();
     for (label, needles) in checks {
-        if !needles.iter().any(|needle| normalized.contains(&needle.to_lowercase())) {
+        if !needles
+            .iter()
+            .any(|needle| normalized.contains(&needle.to_lowercase()))
+        {
             missing.push(label.to_string());
         }
     }
@@ -145,7 +156,8 @@ pub fn check_completeness(markdown: &str) -> CompletenessReport {
 
     let has_score_shape = ["权重", "分值", "默认分", "0-100", "100分"]
         .iter()
-        .any(|word| markdown.contains(word));
+        .any(|word| markdown.contains(word))
+        || (markdown.chars().any(|ch| ch.is_ascii_digit()) && markdown.contains('分'));
     if !has_score_shape {
         warnings.push("评分规则没有明确维度、权重或默认分值".to_string());
     }
@@ -178,7 +190,11 @@ pub fn save_version(
     let now = now_iso();
     let system_id = trade_system_id.unwrap_or_else(|| new_id("ts"));
     let existing: Option<String> = conn
-        .query_row("select id from trade_systems where id = ?1", params![system_id], |row| row.get(0))
+        .query_row(
+            "select id from trade_systems where id = ?1",
+            params![system_id],
+            |row| row.get(0),
+        )
         .optional()?;
 
     if existing.is_none() {
@@ -229,7 +245,11 @@ pub fn save_version(
     get_version(conn, &version_id)
 }
 
-pub fn export_version(conn: &Connection, version_id: &str, target_path: &str) -> AppResult<ExportResult> {
+pub fn export_version(
+    conn: &Connection,
+    version_id: &str,
+    target_path: &str,
+) -> AppResult<ExportResult> {
     let version = get_version(conn, version_id)?;
     let path = Path::new(target_path);
     if let Some(parent) = path.parent() {
@@ -265,7 +285,8 @@ pub fn generate_draft_from_materials(
         }
     }
 
-    let user_prompt = prompt.unwrap_or_else(|| "请整理成可评分、可执行的趋势交易系统。".to_string());
+    let user_prompt =
+        prompt.unwrap_or_else(|| "请整理成可评分、可执行的趋势交易系统。".to_string());
     let body = material_text.join("\n\n");
     let markdown = format!(
         r#"# 我的趋势交易系统
@@ -331,10 +352,6 @@ where
         values.push(row?);
     }
     Ok(values)
-}
-
-pub fn value_to_string(value: &Value) -> String {
-    serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
 }
 
 #[cfg(test)]

@@ -11,7 +11,7 @@ use crate::services::kline_sync_service;
 use crate::services::model_provider_service::{get_active_provider, get_provider, resolve_api_key};
 use crate::services::trade_system_service::get_version;
 use crate::services::watchlist_service::list_items;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use serde_json::Value;
 
 pub async fn score_stock(
@@ -52,15 +52,26 @@ pub async fn score_stock(
         let daily = get_bars(&duck, &stock_code, "1d", None, None, Some(160))?;
         let weekly = get_bars(&duck, &stock_code, "1w", None, None, Some(80))?;
         let monthly = get_bars(&duck, &stock_code, "1M", None, None, Some(60))?;
-        let annotations =
-            annotation_service::list_chart_annotations(&sqlite, &stock_code, Some(version.id.clone()))?;
+        let annotations = annotation_service::list_chart_annotations(
+            &sqlite,
+            &stock_code,
+            Some(version.id.clone()),
+        )?;
         let provider = if let Some(provider_id) = provider_id {
             Some(get_provider(&sqlite, &provider_id)?)
         } else {
             get_active_provider(&sqlite)?
         }
         .ok_or_else(|| AppError::new("provider_request_failed", "未配置活跃模型 Provider", true))?;
-        (version, coverage, daily, weekly, monthly, annotations, provider)
+        (
+            version,
+            coverage,
+            daily,
+            weekly,
+            monthly,
+            annotations,
+            provider,
+        )
     };
 
     let coverage_json = serde_json::to_value(&coverage)?;
@@ -174,7 +185,14 @@ pub async fn run_daily_review(
             }
         };
 
-        match score_stock(state, item.stock_code.clone(), trade_system_version_id.clone(), None).await {
+        match score_stock(
+            state,
+            item.stock_code.clone(),
+            trade_system_version_id.clone(),
+            None,
+        )
+        .await
+        {
             Ok(review) => results.push(DailyReviewItem {
                 stock_code: item.stock_code,
                 sync_status,
@@ -227,14 +245,26 @@ fn persist_review(
         .and_then(|node| node.as_str())
         .unwrap_or("")
         .to_string();
-    let core_reasons = parsed.get("core_reasons").cloned().unwrap_or_else(|| serde_json::json!([]));
-    let evidence = parsed.get("evidence").cloned().unwrap_or_else(|| serde_json::json!([]));
-    let trade_plan = parsed.get("trade_plan").cloned().unwrap_or_else(|| serde_json::json!({}));
+    let core_reasons = parsed
+        .get("core_reasons")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    let evidence = parsed
+        .get("evidence")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    let trade_plan = parsed
+        .get("trade_plan")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
     let chart_annotations = parsed
         .get("chart_annotations")
         .cloned()
         .unwrap_or_else(|| serde_json::json!([]));
-    let uncertainty = parsed.get("uncertainty").cloned().unwrap_or_else(|| serde_json::json!([]));
+    let uncertainty = parsed
+        .get("uncertainty")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
 
     let conn = state.sqlite.lock().expect("sqlite lock");
     conn.execute(
@@ -368,7 +398,9 @@ fn summarize_bars(bars: &[crate::models::KlineBar]) -> Value {
 fn stock_review_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StockReview> {
     let parse = |index: usize| {
         let raw: String = row.get(index)?;
-        Ok::<Value, rusqlite::Error>(serde_json::from_str(&raw).unwrap_or_else(|_| serde_json::json!({})))
+        Ok::<Value, rusqlite::Error>(
+            serde_json::from_str(&raw).unwrap_or_else(|_| serde_json::json!({})),
+        )
     };
     Ok(StockReview {
         id: row.get(0)?,
