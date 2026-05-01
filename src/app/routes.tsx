@@ -15,7 +15,7 @@ export type PageId =
   | 'trade-system'
   | 'agent'
   | 'stock-review'
-  | 'data'
+  | 'kline-data'
   | 'settings'
 
 export const routes = [
@@ -24,7 +24,7 @@ export const routes = [
   { id: 'trade-system', label: '交易系统', icon: FileText },
   { id: 'agent', label: 'Agent', icon: Bot },
   { id: 'stock-review', label: '股票评分', icon: Activity },
-  { id: 'data', label: '数据', icon: Database },
+  { id: 'kline-data', label: 'K线数据', icon: Database },
   { id: 'settings', label: '设置', icon: Settings }
 ] as const satisfies Array<{ id: PageId; label: string; icon: typeof BarChart3 }>
 

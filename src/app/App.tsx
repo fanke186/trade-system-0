@@ -8,7 +8,7 @@ import { TradeSystemPage } from '../pages/TradeSystemPage'
 import { AgentPage } from '../pages/AgentPage'
 import { StockReviewPage } from '../pages/StockReviewPage'
 import { MyWatchlistPage } from '../pages/MyWatchlistPage'
-import { DataPage } from '../pages/DataPage'
+import { KlineDataPage } from '../pages/KlineDataPage'
 import { SettingsPage } from '../pages/SettingsPage'
 
 export function App() {
@@ -72,7 +72,7 @@ export function App() {
         onStockCodeChange={setStockCode}
       />
     ),
-    data: <DataPage stockCode={stockCode} onStockCodeChange={setStockCode} />,
+    'kline-data': <KlineDataPage stockCode={stockCode} onStockCodeChange={setStockCode} />,
     settings: <SettingsPage />
   } satisfies Record<PageId, ReactElement>
 
