@@ -40,4 +40,5 @@ cd src-tauri && cargo test         # Rust 测试
 
 ## 参考文档
 
-`docs/reference/trend-trader/` 目录存放 trend-trader 项目的原始设计文档，**不是当前系统的设计文档**，仅供参考。该目录下的 README.md 有详细说明。
+- `docs/trading-system-template.md` — **交易系统模板**（SSOT），定义通用交易系统的三层13章骨架。AI Agent 据此模板引导用户填写、检测缺口、触发追问。
+- `docs/reference/trend-trader/` 目录存放 trend-trader 项目的原始设计文档，**不是当前系统的设计文档**，仅供参考。该目录下的 README.md 有详细说明。
