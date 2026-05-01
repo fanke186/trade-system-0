@@ -157,7 +157,7 @@ export function SettingsPage() {
               <Td>
                 <div className="flex gap-2">
                   {provider.enabled ? <Badge tone="success">enabled</Badge> : <Badge>disabled</Badge>}
-                  {provider.isActive ? <Badge tone="accent">active</Badge> : null}
+                  {provider.isActive ? <Badge tone="info">active</Badge> : null}
                 </div>
               </Td>
               <Td>

@@ -30,11 +30,13 @@ export function AppShell({
   const selectedSystem = tradeSystems.find(system => system.activeVersionId === selectedVersionId)
 
   return (
-    <div className="grid h-screen grid-cols-[220px_minmax(680px,1fr)_320px] grid-rows-[48px_1fr] bg-background">
+    <div className="grid h-screen grid-cols-[200px_minmax(680px,1fr)_280px] grid-rows-[48px_1fr] bg-background">
       <aside className="row-span-2 border-r border-border bg-panel">
         <div className="flex h-12 items-center gap-2 border-b border-border px-4">
-          <CircleDot className="h-4 w-4 text-accent" />
-          <div className="text-sm font-semibold">trade-system-0</div>
+          <CircleDot className="h-4 w-4 text-ring" />
+          <div className="text-sm font-semibold text-foreground font-mono">
+            trade-system-0
+          </div>
         </div>
         <nav className="p-2">
           {routes.map(route => {
@@ -42,9 +44,9 @@ export function AppShell({
             return (
               <button
                 className={cn(
-                  'mb-1 flex h-9 w-full items-center gap-2 px-3 text-left text-sm transition',
+                  'mb-1 flex h-9 w-full items-center gap-2 px-3 text-left text-sm transition font-mono',
                   activePage === route.id
-                    ? 'bg-accent text-accent-foreground'
+                    ? 'bg-ring text-panel'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 )}
                 key={route.id}
@@ -70,7 +72,7 @@ export function AppShell({
                 : '未选择'}
           </Badge>
           <span>Provider</span>
-          <Badge tone={activeProvider ? 'accent' : 'warning'}>{activeProvider?.name ?? '未配置'}</Badge>
+          <Badge tone={activeProvider ? 'info' : 'warning'}>{activeProvider?.name ?? '未配置'}</Badge>
         </div>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1">
@@ -89,11 +91,13 @@ export function AppShell({
 
       <aside className="overflow-auto border-l border-border bg-panel">
         <div className="border-b border-border px-4 py-3">
-          <div className="text-xs font-medium text-muted-foreground">当前股票</div>
-          <div className="mt-1 text-lg font-semibold">{stockCode || '-'}</div>
+          <div className="text-xs font-medium text-muted-foreground font-mono">当前股票</div>
+          <div className="mt-1 text-lg font-semibold text-foreground font-mono">
+            {stockCode || '-'}
+          </div>
         </div>
         <div className="border-b border-border px-4 py-3">
-          <div className="text-xs font-medium text-muted-foreground">K 线覆盖</div>
+          <div className="text-xs font-medium text-muted-foreground font-mono">K 线覆盖</div>
           <dl className="mt-2 grid gap-1 text-xs">
             <ContextRow label="日 K" value={coverageText(coverage?.daily)} />
             <ContextRow label="周 K" value={coverageText(coverage?.weekly)} />
@@ -102,17 +106,17 @@ export function AppShell({
           </dl>
         </div>
         <div className="px-4 py-3">
-          <div className="text-xs font-medium text-muted-foreground">最近评分</div>
+          <div className="text-xs font-medium text-muted-foreground font-mono">最近评分</div>
           {latestReview ? (
             <div className="mt-2 grid gap-2 text-xs">
               <div className="flex items-center gap-2">
                 <Badge tone={latestReview.score ? 'success' : 'warning'}>
                   {latestReview.score ?? '-'} / 100
                 </Badge>
-                <Badge>{latestReview.rating}</Badge>
+                <Badge tone="info">{latestReview.rating}</Badge>
               </div>
               <p className="leading-5 text-muted-foreground">{latestReview.overallEvaluation}</p>
-              <pre className="max-h-64 overflow-auto bg-muted p-2 text-[11px] leading-4">
+              <pre className="max-h-64 overflow-auto bg-muted p-2 text-[11px] leading-4 text-foreground font-mono">
                 {jsonPreview(latestReview.tradePlan)}
               </pre>
             </div>
@@ -129,7 +133,7 @@ function ContextRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-2">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="truncate text-right text-foreground">{value}</dd>
+      <dd className="truncate text-right font-mono text-foreground">{value}</dd>
     </div>
   )
 }
@@ -138,4 +142,3 @@ function coverageText(item?: KlineCoverage['daily']) {
   if (!item || item.rows === 0) return '无数据'
   return `${item.startDate ?? '-'} 至 ${item.endDate ?? '-'} (${formatRows(item.rows)})`
 }
-

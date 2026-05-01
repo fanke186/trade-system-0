@@ -6,21 +6,21 @@ export function Badge({
   tone = 'neutral'
 }: {
   children: ReactNode
-  tone?: 'neutral' | 'success' | 'warning' | 'danger' | 'accent'
+  tone?: 'neutral' | 'success' | 'warning' | 'danger' | 'info' | 'extra'
 }) {
   return (
     <span
       className={cn(
-        'inline-flex h-6 items-center border px-2 text-xs font-medium',
-        tone === 'neutral' && 'border-border bg-muted text-muted-foreground',
-        tone === 'success' && 'border-success/20 bg-success/10 text-success',
-        tone === 'warning' && 'border-warning/20 bg-warning/10 text-warning',
-        tone === 'danger' && 'border-danger/20 bg-danger/10 text-danger',
-        tone === 'accent' && 'border-accent/20 bg-accent/10 text-accent'
+        'inline-flex h-6 items-center px-2 text-xs font-medium font-mono',
+        tone === 'neutral' && 'bg-muted text-muted-foreground',
+        tone === 'success' && 'bg-success/20 text-success',
+        tone === 'warning' && 'bg-warning/20 text-warning',
+        tone === 'danger' && 'bg-danger/20 text-danger',
+        tone === 'info' && 'bg-info/20 text-info',
+        tone === 'extra' && 'bg-extra/20 text-extra'
       )}
     >
       {children}
     </span>
   )
 }
-
