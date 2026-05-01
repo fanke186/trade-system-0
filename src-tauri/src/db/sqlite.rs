@@ -3,13 +3,17 @@ use rusqlite::Connection;
 use std::path::Path;
 
 pub fn open(path: &Path) -> AppResult<Connection> {
-    let conn = Connection::open(path)?;
+    tracing::info!(path = %path.display(), "打开 SQLite 连接");
+    let conn = Connection::open(path).inspect_err(|e| {
+        tracing::error!(error = %e, path = %path.display(), "SQLite 连接失败");
+    })?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     Ok(conn)
 }
 
 pub fn run_migrations(conn: &Connection) -> AppResult<()> {
+    tracing::info!("执行 SQLite 建表迁移");
     conn.execute_batch(
         r#"
         create table if not exists schema_migrations (
@@ -144,6 +148,7 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
     )?;
 
     seed_defaults(conn)?;
+    tracing::info!("SQLite 建表迁移完成");
     Ok(())
 }
 

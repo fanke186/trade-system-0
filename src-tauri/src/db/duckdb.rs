@@ -5,10 +5,15 @@ use std::path::Path;
 pub type DuckConnection = Connection;
 
 pub fn open(path: &Path) -> AppResult<DuckConnection> {
-    Ok(Connection::open(path)?)
+    tracing::info!(path = %path.display(), "打开 DuckDB 连接");
+    let conn = Connection::open(path).inspect_err(|e| {
+        tracing::error!(error = %e, path = %path.display(), "DuckDB 连接失败");
+    })?;
+    Ok(conn)
 }
 
 pub fn run_migrations(conn: &DuckConnection) -> AppResult<()> {
+    tracing::info!("执行 DuckDB 建表迁移");
     conn.execute_batch(
         r#"
         create table if not exists schema_migrations (
@@ -96,6 +101,7 @@ pub fn run_migrations(conn: &DuckConnection) -> AppResult<()> {
         "#,
     )?;
     seed_defaults(conn)?;
+    tracing::info!("DuckDB 建表迁移完成");
     Ok(())
 }
 

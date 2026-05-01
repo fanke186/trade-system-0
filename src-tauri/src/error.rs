@@ -38,11 +38,13 @@ impl AppError {
     }
 
     pub fn database(error: impl ToString) -> Self {
+        let msg = error.to_string();
+        tracing::error!(%msg, "数据库操作失败");
         Self::with_detail(
             "database_error",
             "本地数据库操作失败",
             true,
-            serde_json::json!({ "error": error.to_string() }),
+            serde_json::json!({ "error": msg }),
         )
     }
 }
@@ -61,6 +63,7 @@ impl From<duckdb::Error> for AppError {
 
 impl From<std::io::Error> for AppError {
     fn from(value: std::io::Error) -> Self {
+        tracing::error!(error = %value, "文件操作失败");
         Self::with_detail(
             "filesystem_error",
             "本地文件操作失败",
@@ -72,6 +75,7 @@ impl From<std::io::Error> for AppError {
 
 impl From<reqwest::Error> for AppError {
     fn from(value: reqwest::Error) -> Self {
+        tracing::error!(error = %value, "Provider 请求失败");
         Self::with_detail(
             "provider_request_failed",
             "模型 Provider 请求失败",
@@ -83,6 +87,7 @@ impl From<reqwest::Error> for AppError {
 
 impl From<serde_json::Error> for AppError {
     fn from(value: serde_json::Error) -> Self {
+        tracing::error!(error = %value, "JSON 解析失败");
         Self::with_detail(
             "invalid_json",
             "JSON 解析失败",
@@ -94,6 +99,7 @@ impl From<serde_json::Error> for AppError {
 
 impl From<anyhow::Error> for AppError {
     fn from(value: anyhow::Error) -> Self {
+        tracing::error!(error = %value, "内部错误");
         Self::with_detail(
             "internal_error",
             "应用内部错误",

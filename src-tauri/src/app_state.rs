@@ -13,6 +13,8 @@ pub struct AppState {
 
 impl AppState {
     pub fn initialize(app_dir: PathBuf) -> AppResult<Self> {
+        tracing::info!(app_dir = %app_dir.display(), "正在初始化应用状态");
+
         std::fs::create_dir_all(&app_dir)?;
         for child in [
             "materials",
@@ -30,10 +32,19 @@ impl AppState {
         migrations::backup_if_present(&app_dir, &sqlite_path)?;
         migrations::backup_if_present(&app_dir, &duckdb_path)?;
 
+        tracing::info!("正在打开 SQLite 数据库");
         let sqlite = sqlite::open(&sqlite_path)?;
+        tracing::info!("SQLite 连接成功，正在执行迁移");
         sqlite::run_migrations(&sqlite)?;
+        tracing::info!("SQLite 迁移完成");
+
+        tracing::info!("正在打开 DuckDB 数据库");
         let duckdb = duckdb::open(&duckdb_path)?;
+        tracing::info!("DuckDB 连接成功，正在执行迁移");
         duckdb::run_migrations(&duckdb)?;
+        tracing::info!("DuckDB 迁移完成");
+
+        tracing::info!("应用状态初始化完成");
 
         Ok(Self {
             app_dir,
