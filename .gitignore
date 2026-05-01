@@ -1,0 +1,22 @@
+.DS_Store
+node_modules/
+dist/
+dist-ssr/
+coverage/
+.vscode/
+.idea/
+*.log
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/
+src-tauri/.tauri/
+
+# Local application data used during development
+trade-system-0-data/
+.data/
+
+# Secrets
+*.key
+secrets/
+

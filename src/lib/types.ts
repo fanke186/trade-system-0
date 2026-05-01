@@ -1,0 +1,259 @@
+export type AppError = {
+  code: string
+  message: string
+  detail?: unknown
+  recoverable: boolean
+}
+
+export type CompletenessReport = {
+  status: string
+  missingSections: string[]
+  warnings: string[]
+  canScore: boolean
+}
+
+export type TradeSystemSummary = {
+  id: string
+  name: string
+  description?: string | null
+  activeVersionId?: string | null
+  activeVersion?: number | null
+  completenessStatus?: string | null
+  updatedAt: string
+}
+
+export type TradeSystemVersion = {
+  id: string
+  tradeSystemId: string
+  version: number
+  markdown: string
+  contentHash: string
+  completenessStatus: string
+  completenessReport: CompletenessReport
+  changeSummary?: string | null
+  createdAt: string
+}
+
+export type TradeSystemDetail = {
+  id: string
+  name: string
+  description?: string | null
+  activeVersionId?: string | null
+  createdAt: string
+  updatedAt: string
+  versions: TradeSystemVersion[]
+}
+
+export type MaterialRecord = {
+  id: string
+  tradeSystemId?: string | null
+  fileName: string
+  filePath: string
+  mimeType?: string | null
+  extractedText?: string | null
+  parseStatus: string
+  parseError?: string | null
+  createdAt: string
+}
+
+export type TradeSystemDraft = {
+  markdown: string
+  gapQuestions: string[]
+  sourceMaterialIds: string[]
+}
+
+export type ModelProvider = {
+  id: string
+  name: string
+  providerType: string
+  baseUrl: string
+  apiKeyRef: string
+  model: string
+  temperature: number
+  maxTokens: number
+  enabled: boolean
+  isActive: boolean
+  extraJson: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+export type SaveModelProviderInput = {
+  id?: string
+  name: string
+  providerType: string
+  baseUrl: string
+  apiKey?: string
+  apiKeyRef?: string
+  model: string
+  temperature?: number
+  maxTokens?: number
+  enabled?: boolean
+  isActive?: boolean
+  extraJson?: Record<string, unknown>
+}
+
+export type ProviderTestResult = {
+  ok: boolean
+  providerId: string
+  message: string
+  latencyMs?: number | null
+}
+
+export type Agent = {
+  id: string
+  tradeSystemId: string
+  tradeSystemVersionId: string
+  name: string
+  modelProviderId?: string | null
+  systemPrompt: string
+  outputSchemaJson: unknown
+  createdAt: string
+  updatedAt: string
+}
+
+export type ChatMessage = {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+}
+
+export type AgentChatResult = {
+  agentId: string
+  content: string
+  rawJson?: unknown
+}
+
+export type KlineBar = {
+  date: string
+  open: number
+  high: number
+  low: number
+  close: number
+  preClose?: number | null
+  volume: number
+  amount: number
+  turnover?: number | null
+  adjFactor?: number | null
+}
+
+export type FrequencyCoverage = {
+  frequency: string
+  startDate?: string | null
+  endDate?: string | null
+  rows: number
+}
+
+export type KlineCoverage = {
+  stockCode: string
+  daily: FrequencyCoverage
+  weekly: FrequencyCoverage
+  monthly: FrequencyCoverage
+  lastSyncAt?: string | null
+}
+
+export type KlineSyncResult = {
+  stockCode: string
+  mode: string
+  status: string
+  rowsWritten: number
+  source: string
+  coverage: KlineCoverage
+}
+
+export type Security = {
+  symbolId: number
+  code: string
+  name: string
+  exchange: string
+  board?: string | null
+  listDate?: string | null
+  status: string
+}
+
+export type WatchlistItem = {
+  id: string
+  watchlistId: string
+  stockCode: string
+  localStatus: string
+  note?: string | null
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type Watchlist = {
+  id: string
+  name: string
+  createdAt: string
+  updatedAt: string
+  items: WatchlistItem[]
+}
+
+export type StockReview = {
+  id: string
+  status: string
+  stockCode: string
+  tradeSystemId: string
+  tradeSystemVersionId: string
+  modelProviderId?: string | null
+  score?: number | null
+  rating: 'focus' | 'watch' | 'reject' | 'data_required' | 'undefined_rule'
+  overallEvaluation: string
+  coreReasons: unknown
+  evidence: unknown
+  tradePlan: unknown
+  chartAnnotations: unknown
+  uncertainty: unknown
+  klineCoverage: unknown
+  promptHash: string
+  outputHash: string
+  createdAt: string
+}
+
+export type DailyReviewRun = {
+  watchlistId: string
+  tradeSystemVersionId: string
+  total: number
+  results: DailyReviewItem[]
+}
+
+export type DailyReviewItem = {
+  stockCode: string
+  syncStatus: string
+  reviewStatus: string
+  score?: number | null
+  rating?: string | null
+  message?: string | null
+}
+
+export type ChartAnnotation = {
+  id: string
+  stockCode: string
+  tradeSystemVersionId?: string | null
+  reviewId?: string | null
+  source: 'user' | 'agent'
+  annotationType: 'horizontal_line' | 'ray'
+  payload: ChartAnnotationPayload
+  createdAt: string
+  updatedAt: string
+}
+
+export type ChartAnnotationPayload =
+  | {
+      type: 'horizontal_line'
+      price: number
+      label?: string
+      reason?: string
+    }
+  | {
+      type: 'ray'
+      start: { date: string; price: number }
+      end: { date: string; price: number }
+      label?: string
+      reason?: string
+      snappedTo?: 'high' | 'low'
+    }
+
+export type OkResult = {
+  ok: boolean
+}

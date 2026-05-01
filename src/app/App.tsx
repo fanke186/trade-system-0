@@ -1,0 +1,95 @@
+import { type ReactElement, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { AppShell } from '../components/layout/AppShell'
+import { commands } from '../lib/commands'
+import type { PageId } from './routes'
+import { DailyReviewPage } from '../pages/DailyReviewPage'
+import { TradeSystemPage } from '../pages/TradeSystemPage'
+import { AgentPage } from '../pages/AgentPage'
+import { StockReviewPage } from '../pages/StockReviewPage'
+import { ChartPage } from '../pages/ChartPage'
+import { WatchlistPage } from '../pages/WatchlistPage'
+import { DataPage } from '../pages/DataPage'
+import { SettingsPage } from '../pages/SettingsPage'
+
+export function App() {
+  const [activePage, setActivePage] = useState<PageId>('daily-review')
+  const [stockCode, setStockCode] = useState('002261')
+  const [selectedVersionId, setSelectedVersionId] = useState<string | undefined>()
+
+  const tradeSystemsQuery = useQuery({
+    queryKey: ['trade-systems'],
+    queryFn: commands.listTradeSystems
+  })
+  const providersQuery = useQuery({
+    queryKey: ['model-providers'],
+    queryFn: commands.listModelProviders
+  })
+  const coverageQuery = useQuery({
+    queryKey: ['coverage', stockCode],
+    queryFn: () => commands.getDataCoverage(stockCode),
+    enabled: Boolean(stockCode)
+  })
+  const reviewsQuery = useQuery({
+    queryKey: ['stock-reviews', stockCode, selectedVersionId],
+    queryFn: () => commands.getStockReviews(stockCode, selectedVersionId),
+    enabled: Boolean(stockCode)
+  })
+
+  const tradeSystems = tradeSystemsQuery.data ?? []
+  const activeProvider = providersQuery.data?.find(provider => provider.isActive)
+  const latestReview = reviewsQuery.data?.[0]
+
+  const activeVersionId = useMemo(() => {
+    if (selectedVersionId) return selectedVersionId
+    return tradeSystems.find(system => system.activeVersionId)?.activeVersionId ?? undefined
+  }, [selectedVersionId, tradeSystems])
+
+  const page = {
+    'daily-review': (
+      <DailyReviewPage
+        selectedVersionId={activeVersionId}
+        onSelectVersion={setSelectedVersionId}
+        stockCode={stockCode}
+        onStockCodeChange={setStockCode}
+      />
+    ),
+    'trade-system': (
+      <TradeSystemPage selectedVersionId={activeVersionId} onSelectVersion={setSelectedVersionId} />
+    ),
+    agent: <AgentPage selectedVersionId={activeVersionId} />,
+    'stock-review': (
+      <StockReviewPage
+        selectedVersionId={activeVersionId}
+        onSelectVersion={setSelectedVersionId}
+        stockCode={stockCode}
+        onStockCodeChange={setStockCode}
+      />
+    ),
+    chart: (
+      <ChartPage
+        selectedVersionId={activeVersionId}
+        stockCode={stockCode}
+        onStockCodeChange={setStockCode}
+      />
+    ),
+    watchlist: <WatchlistPage onStockCodeChange={setStockCode} />,
+    data: <DataPage stockCode={stockCode} onStockCodeChange={setStockCode} />,
+    settings: <SettingsPage />
+  } satisfies Record<PageId, ReactElement>
+
+  return (
+    <AppShell
+      activePage={activePage}
+      onPageChange={setActivePage}
+      tradeSystems={tradeSystems}
+      activeProvider={activeProvider}
+      coverage={coverageQuery.data}
+      stockCode={stockCode}
+      selectedVersionId={activeVersionId}
+      latestReview={latestReview}
+    >
+      {page[activePage]}
+    </AppShell>
+  )
+}
