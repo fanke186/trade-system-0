@@ -25,6 +25,8 @@ pub fn run() {
                 )
             })?;
             app.manage(state);
+            let app_handle = app.handle().clone();
+            services::ai_score_service::resume_pending_runs(&app_handle);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -32,16 +34,23 @@ pub fn run() {
             commands::trade_system::get_trade_system,
             commands::trade_system::import_material,
             commands::trade_system::generate_trade_system_draft,
+            commands::trade_system::propose_trade_system_revision,
             commands::trade_system::check_trade_system_completeness,
             commands::trade_system::save_trade_system_version,
             commands::trade_system::export_trade_system_version,
             commands::trade_system::add_trade_system_stocks,
+            commands::trade_system::remove_trade_system_stock,
+            commands::trade_system::list_trade_system_stocks,
+            commands::trade_system::delete_trade_system,
             commands::provider::list_model_providers,
             commands::provider::save_model_provider,
             commands::provider::set_active_model_provider,
             commands::provider::test_model_provider,
             commands::agent::create_agent_from_trade_system,
             commands::agent::run_agent_chat,
+            commands::ai_score::trigger_ai_score,
+            commands::ai_score::list_ai_score_records,
+            commands::ai_score::delete_ai_score_record,
             commands::kline::refresh_from_market,
             commands::kline::get_bars,
             commands::kline::get_data_coverage,

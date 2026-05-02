@@ -8,7 +8,7 @@ use crate::services::annotation_service;
 use crate::services::common::{new_id, now_iso, sha256_hex};
 use crate::services::kline_query_service::{get_bars, get_data_coverage};
 use crate::services::model_provider_service::{get_active_provider, get_provider, resolve_api_key};
-use crate::services::trade_system_service::get_version;
+use crate::services::trade_system_service::{get_version, update_trade_system_stock_review};
 use crate::services::watchlist_service::list_items;
 use rusqlite::{params, Connection};
 use serde_json::Value;
@@ -51,10 +51,10 @@ pub async fn score_stock(
         let daily = get_bars(&duck, &stock_code, "1d", None, None, Some(160), None)?;
         let weekly = get_bars(&duck, &stock_code, "1w", None, None, Some(80), None)?;
         let monthly = get_bars(&duck, &stock_code, "1M", None, None, Some(60), None)?;
-        let quarterly = get_bars(&duck, &stock_code, "1Q", None, None, Some(40), None)
-            .unwrap_or_default();
-        let yearly = get_bars(&duck, &stock_code, "1Y", None, None, Some(20), None)
-            .unwrap_or_default();
+        let quarterly =
+            get_bars(&duck, &stock_code, "1Q", None, None, Some(40), None).unwrap_or_default();
+        let yearly =
+            get_bars(&duck, &stock_code, "1Y", None, None, Some(20), None).unwrap_or_default();
         let annotations = annotation_service::list_chart_annotations(
             &sqlite,
             &stock_code,
@@ -329,6 +329,38 @@ fn persist_review(
         }
     }
 
+    let report_payload = serde_json::json!({
+        "reviewId": review_id,
+        "stockCode": stock_code,
+        "tradeSystemId": trade_system_id,
+        "tradeSystemVersionId": trade_system_version_id,
+        "score": score,
+        "rating": rating,
+        "overallEvaluation": overall,
+        "coreReasons": core_reasons,
+        "evidence": evidence,
+        "tradePlan": trade_plan,
+        "chartAnnotations": chart_annotations,
+        "uncertainty": uncertainty,
+        "createdAt": now
+    });
+    let report_path = write_review_report(
+        &conn,
+        &state.app_dir,
+        trade_system_id,
+        stock_code,
+        &review_id,
+        &report_payload,
+    )?;
+    update_trade_system_stock_review(
+        &conn,
+        trade_system_id,
+        stock_code,
+        score,
+        report_payload.to_string(),
+        Some(report_path),
+    )?;
+
     conn.query_row(
         r#"
         select id, stock_code, trade_system_id, trade_system_version_id, model_provider_id,
@@ -342,6 +374,176 @@ fn persist_review(
         stock_review_from_row,
     )
     .map_err(Into::into)
+}
+
+fn write_review_report(
+    conn: &Connection,
+    app_dir: &std::path::Path,
+    trade_system_id: &str,
+    stock_code: &str,
+    review_id: &str,
+    report: &Value,
+) -> AppResult<String> {
+    let (name, system_path): (String, Option<String>) = conn
+        .query_row(
+            "select name, system_path from trade_systems where id = ?1",
+            params![trade_system_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap_or_else(|_| ("trade-system".to_string(), None));
+    let agent_dir = system_path
+        .as_deref()
+        .and_then(|value| {
+            std::path::Path::new(value)
+                .parent()
+                .map(std::path::Path::to_path_buf)
+        })
+        .unwrap_or_else(|| app_dir.join("agents").join(safe_report_dir_name(&name)));
+    let report_dir = agent_dir.join("reports");
+    std::fs::create_dir_all(&report_dir)?;
+    let safe_stock_code: String = stock_code
+        .chars()
+        .map(|ch| match ch {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => ch,
+        })
+        .collect();
+    let report_path = report_dir.join(format!("{}-{}.html", safe_stock_code, review_id));
+    let pretty = serde_json::to_string_pretty(report)?;
+    let score = report
+        .get("score")
+        .map(|value| {
+            if value.is_null() {
+                "--".to_string()
+            } else {
+                value.to_string()
+            }
+        })
+        .unwrap_or_else(|| "--".to_string());
+    let rating = report
+        .get("rating")
+        .and_then(|value| value.as_str())
+        .unwrap_or("-");
+    let overall = report
+        .get("overallEvaluation")
+        .and_then(|value| value.as_str())
+        .unwrap_or("暂无摘要");
+    let created_at = report
+        .get("createdAt")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let html = format!(
+        r#"<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{stock_code} 评分报告</title>
+  <style>
+    :root {{ color-scheme: dark; }}
+    body {{ margin: 0; background: #0d0d0f; color: #efefef; font: 14px/1.65 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }}
+    main {{ max-width: 1080px; margin: 0 auto; padding: 40px 24px 56px; }}
+    h1 {{ margin: 0; font-size: 30px; letter-spacing: 0; }}
+    h2 {{ margin: 0 0 12px; font-size: 14px; color: #8a8a8a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
+    .top {{ display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; margin-bottom: 24px; }}
+    .meta {{ color: #8a8a8a; margin-top: 8px; }}
+    .score {{ min-width: 180px; border: 1px solid #2a2a2e; background: #151518; padding: 18px; text-align: right; }}
+    .score-value {{ font: 700 54px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: #7dcfff; }}
+    .rating {{ margin-top: 8px; color: #f0b93b; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
+    .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }}
+    .card {{ border: 1px solid #2a2a2e; background: #151518; padding: 18px; }}
+    .wide {{ grid-column: 1 / -1; }}
+    p {{ margin: 0; }}
+    pre {{ white-space: pre-wrap; background: #0d0d0f; border: 1px solid #2a2a2e; padding: 14px; overflow: auto; color: #d8d8d8; }}
+    @media (max-width: 760px) {{ .top, .grid {{ display: block; }} .score, .card {{ margin-bottom: 14px; }} }}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="top">
+      <div>
+        <h1>{stock_code} 评分报告</h1>
+        <div class="meta">Review: {review_id} · {created_at}</div>
+      </div>
+      <div class="score">
+        <div class="score-value">{score}</div>
+        <div class="rating">{rating}</div>
+      </div>
+    </div>
+    <div class="grid">
+      <section class="card wide">
+        <h2>摘要</h2>
+        <p>{overall}</p>
+      </section>
+      <section class="card">
+        <h2>核心理由</h2>
+        <pre>{core_reasons}</pre>
+      </section>
+      <section class="card">
+        <h2>证据</h2>
+        <pre>{evidence}</pre>
+      </section>
+      <section class="card">
+        <h2>交易计划</h2>
+        <pre>{trade_plan}</pre>
+      </section>
+      <section class="card">
+        <h2>不确定性</h2>
+        <pre>{uncertainty}</pre>
+      </section>
+      <section class="card wide">
+        <h2>原始 JSON</h2>
+        <pre>{raw_json}</pre>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
+"#,
+        created_at = escape_html(created_at),
+        score = escape_html(&score),
+        rating = escape_html(rating),
+        overall = escape_html(overall),
+        core_reasons = escape_html(&pretty_json(report.get("coreReasons"))),
+        evidence = escape_html(&pretty_json(report.get("evidence"))),
+        trade_plan = escape_html(&pretty_json(report.get("tradePlan"))),
+        uncertainty = escape_html(&pretty_json(report.get("uncertainty"))),
+        raw_json = escape_html(&pretty)
+    );
+    std::fs::write(&report_path, html)?;
+    Ok(report_path.to_string_lossy().to_string())
+}
+
+fn safe_report_dir_name(name: &str) -> String {
+    let value: String = name
+        .chars()
+        .map(|ch| match ch {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ if ch.is_control() => '_',
+            _ => ch,
+        })
+        .collect();
+    let value = value.trim();
+    if value.is_empty() {
+        "trade-system".to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn pretty_json(value: Option<&Value>) -> String {
+    value
+        .map(|node| serde_json::to_string_pretty(node).unwrap_or_else(|_| node.to_string()))
+        .unwrap_or_else(|| "-".to_string())
 }
 
 fn data_required_review(

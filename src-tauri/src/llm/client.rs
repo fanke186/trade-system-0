@@ -1,7 +1,7 @@
 use crate::error::{AppError, AppResult};
 use crate::models::{ChatMessage, ModelProvider};
 use reqwest::Client;
-use serde::Serialize;
+use serde_json::{Map, Value};
 
 #[derive(Clone)]
 pub struct ModelCallOptions {
@@ -12,22 +12,6 @@ pub struct ModelCallOptions {
     pub max_tokens: Option<i64>,
 }
 
-#[derive(Serialize)]
-struct OpenAiMessage<'a> {
-    role: &'a str,
-    content: &'a str,
-}
-
-#[derive(Serialize)]
-struct OpenAiRequest<'a> {
-    model: &'a str,
-    messages: Vec<OpenAiMessage<'a>>,
-    temperature: f64,
-    max_tokens: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    response_format: Option<serde_json::Value>,
-}
-
 pub async fn call_model(
     client: &Client,
     provider: &ModelProvider,
@@ -35,44 +19,53 @@ pub async fn call_model(
     options: ModelCallOptions,
 ) -> AppResult<String> {
     let mut messages = Vec::with_capacity(options.messages.len() + 1);
-    messages.push(OpenAiMessage {
-        role: "system",
-        content: &options.system_prompt,
-    });
+    messages.push(serde_json::json!({
+        "role": "system",
+        "content": options.system_prompt
+    }));
     for message in &options.messages {
-        messages.push(OpenAiMessage {
-            role: &message.role,
-            content: &message.content,
-        });
+        messages.push(serde_json::json!({
+            "role": &message.role,
+            "content": &message.content
+        }));
     }
 
-    let request = OpenAiRequest {
-        model: &provider.model,
-        messages,
-        temperature: options.temperature.unwrap_or(provider.temperature),
-        max_tokens: options.max_tokens.unwrap_or(provider.max_tokens),
-        response_format: options
-            .response_format
-            .map(|kind| serde_json::json!({ "type": kind })),
-    };
+    let mut request = Map::new();
+    request.insert("model".to_string(), Value::String(provider.model.clone()));
+    request.insert("messages".to_string(), Value::Array(messages));
+    request.insert(
+        "temperature".to_string(),
+        serde_json::json!(options.temperature.unwrap_or(provider.temperature)),
+    );
+    request.insert(
+        "max_tokens".to_string(),
+        serde_json::json!(options.max_tokens.unwrap_or(provider.max_tokens)),
+    );
+    if let Some(kind) = options.response_format {
+        request.insert(
+            "response_format".to_string(),
+            serde_json::json!({ "type": kind }),
+        );
+    }
+    merge_request_overrides(&mut request, &provider.extra_json);
+
     let url = completion_url(&provider.base_url);
     let response = client
         .post(url)
         .bearer_auth(api_key)
-        .json(&request)
+        .json(&Value::Object(request))
         .send()
         .await?;
 
     let status = response.status();
-    let value: serde_json::Value = response.json().await?;
+    let body = response.text().await?;
+    let value: serde_json::Value =
+        serde_json::from_str(&body).unwrap_or_else(|_| serde_json::json!({ "raw": body }));
     if !status.is_success() {
+        let (code, message) = provider_error(status.as_u16());
         return Err(AppError::with_detail(
-            if status.as_u16() == 401 {
-                "provider_auth_failed"
-            } else {
-                "provider_request_failed"
-            },
-            "模型 Provider 返回错误",
+            code,
+            message,
             true,
             serde_json::json!({ "status": status.as_u16(), "response": value }),
         ));
@@ -90,6 +83,29 @@ pub async fn call_model(
                 value,
             )
         })
+}
+
+fn merge_request_overrides(request: &mut Map<String, Value>, extra_json: &Value) {
+    let Some(overrides) = extra_json.get("requestOverrides").and_then(|node| node.as_object()) else {
+        return;
+    };
+    for (key, value) in overrides {
+        if value.is_null() {
+            request.remove(key);
+        } else {
+            request.insert(key.clone(), value.clone());
+        }
+    }
+}
+
+fn provider_error(status: u16) -> (&'static str, &'static str) {
+    match status {
+        401 => ("provider_auth_failed", "模型 Provider 认证失败，请检查 API Key"),
+        402 => ("provider_quota_insufficient", "模型 Provider 余额不足"),
+        429 => ("provider_rate_limited", "模型 Provider 请求速率达到上限"),
+        503 => ("provider_unavailable", "模型 Provider 暂时繁忙，请稍后重试"),
+        _ => ("provider_request_failed", "模型 Provider 返回错误"),
+    }
 }
 
 fn completion_url(base_url: &str) -> String {

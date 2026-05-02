@@ -19,6 +19,9 @@ pub struct TradeSystemSummary {
     pub active_version_id: Option<String>,
     pub active_version: Option<i64>,
     pub completeness_status: Option<String>,
+    pub stock_count: i64,
+    pub system_path: Option<String>,
+    pub persona_path: Option<String>,
     pub updated_at: String,
 }
 
@@ -43,6 +46,11 @@ pub struct TradeSystemDetail {
     pub name: String,
     pub description: Option<String>,
     pub active_version_id: Option<String>,
+    pub active_version: Option<i64>,
+    pub system_md: String,
+    pub system_path: Option<String>,
+    pub persona_md: String,
+    pub persona_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub versions: Vec<TradeSystemVersion>,
@@ -68,6 +76,24 @@ pub struct TradeSystemDraft {
     pub markdown: String,
     pub gap_questions: Vec<String>,
     pub source_material_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TradeSystemRevisionInput {
+    pub mode: String,
+    pub name: String,
+    pub current_markdown: String,
+    pub messages: Vec<ChatMessage>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TradeSystemRevisionProposal {
+    pub assistant_message: String,
+    pub markdown: String,
+    pub diff: String,
+    pub gap_questions: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -267,6 +293,27 @@ pub struct StockReview {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct TradeSystemStock {
+    pub id: String,
+    pub trade_system_id: String,
+    pub symbol: String,
+    pub code: String,
+    pub name: String,
+    pub exchange: Option<String>,
+    pub industry: Option<String>,
+    pub latest_score: Option<i32>,
+    pub previous_report: Option<String>,
+    pub previous_report_path: Option<String>,
+    pub latest_report: Option<String>,
+    pub latest_report_path: Option<String>,
+    pub latest_score_date: Option<String>,
+    pub latest_price: Option<f64>,
+    pub change_pct: Option<f64>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct DailyReviewRun {
     pub watchlist_id: String,
     pub trade_system_version_id: String,
@@ -283,6 +330,69 @@ pub struct DailyReviewItem {
     pub score: Option<i64>,
     pub rating: Option<String>,
     pub message: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TriggerAiScoreInput {
+    pub trigger_type: String,
+    pub trade_system_version_id: String,
+    pub provider_id: Option<String>,
+    pub stock_symbol: Option<String>,
+    pub watchlist_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AiScoreRecordFilter {
+    pub trade_system_id: Option<String>,
+    pub status: Option<String>,
+    pub keyword: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AiScoreRun {
+    pub id: String,
+    pub trigger_type: String,
+    pub trade_system_id: String,
+    pub trade_system_version_id: String,
+    pub provider_id: Option<String>,
+    pub status: String,
+    pub total_count: i64,
+    pub completed_count: i64,
+    pub failed_count: i64,
+    pub target_snapshot: Value,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AiScoreRecord {
+    pub id: String,
+    pub run_id: String,
+    pub stock_symbol: String,
+    pub stock_code: String,
+    pub stock_name: String,
+    pub trade_system_id: String,
+    pub trade_system_version_id: String,
+    pub provider_id: Option<String>,
+    pub trigger_time: String,
+    pub score_date: String,
+    pub status: String,
+    pub score: Option<i64>,
+    pub rating: Option<String>,
+    pub stock_review_id: Option<String>,
+    pub report_path: Option<String>,
+    pub error_message: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

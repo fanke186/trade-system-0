@@ -2,7 +2,8 @@ use crate::app_state::AppState;
 use crate::error::AppResult;
 use crate::models::{
     CompletenessReport, ExportResult, MaterialRecord, OkResult, TradeSystemDetail,
-    TradeSystemDraft, TradeSystemSummary, TradeSystemVersion,
+    TradeSystemDraft, TradeSystemRevisionInput, TradeSystemRevisionProposal, TradeSystemStock,
+    TradeSystemSummary, TradeSystemVersion,
 };
 use crate::services::{material_service, trade_system_service};
 use tauri::State;
@@ -43,6 +44,14 @@ pub fn generate_trade_system_draft(
 }
 
 #[tauri::command]
+pub async fn propose_trade_system_revision(
+    state: State<'_, AppState>,
+    input: TradeSystemRevisionInput,
+) -> AppResult<TradeSystemRevisionProposal> {
+    trade_system_service::propose_revision(&state, input).await
+}
+
+#[tauri::command]
 pub fn check_trade_system_completeness(markdown: String) -> AppResult<CompletenessReport> {
     Ok(trade_system_service::check_completeness(&markdown))
 }
@@ -56,7 +65,14 @@ pub fn save_trade_system_version(
     change_summary: Option<String>,
 ) -> AppResult<TradeSystemVersion> {
     let conn = state.sqlite.lock().expect("sqlite lock");
-    trade_system_service::save_version(&conn, trade_system_id, name, markdown, change_summary)
+    trade_system_service::save_version(
+        &conn,
+        &state.app_dir,
+        trade_system_id,
+        name,
+        markdown,
+        change_summary,
+    )
 }
 
 #[tauri::command]
@@ -73,8 +89,38 @@ pub fn export_trade_system_version(
 pub fn add_trade_system_stocks(
     state: State<'_, AppState>,
     trade_system_id: String,
-    stock_codes: Vec<String>,
+    symbols: Vec<String>,
 ) -> AppResult<OkResult> {
     let conn = state.sqlite.lock().expect("sqlite lock");
-    trade_system_service::add_stocks(&conn, &trade_system_id, stock_codes)
+    let duck = state.duckdb.lock().expect("duckdb lock");
+    trade_system_service::add_stocks(&conn, &duck, &trade_system_id, symbols)
+}
+
+#[tauri::command]
+pub fn remove_trade_system_stock(
+    state: State<'_, AppState>,
+    trade_system_id: String,
+    symbol: String,
+) -> AppResult<OkResult> {
+    let conn = state.sqlite.lock().expect("sqlite lock");
+    trade_system_service::remove_stock(&conn, &trade_system_id, &symbol)
+}
+
+#[tauri::command]
+pub fn list_trade_system_stocks(
+    state: State<'_, AppState>,
+    trade_system_id: String,
+) -> AppResult<Vec<TradeSystemStock>> {
+    let conn = state.sqlite.lock().expect("sqlite lock");
+    let duck = state.duckdb.lock().expect("duckdb lock");
+    trade_system_service::list_trade_system_stocks(&conn, &duck, &trade_system_id)
+}
+
+#[tauri::command]
+pub fn delete_trade_system(
+    state: State<'_, AppState>,
+    trade_system_id: String,
+) -> AppResult<OkResult> {
+    let conn = state.sqlite.lock().expect("sqlite lock");
+    trade_system_service::delete_trade_system(&conn, &state.app_dir, &trade_system_id)
 }

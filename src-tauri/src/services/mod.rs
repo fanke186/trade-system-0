@@ -1,4 +1,5 @@
 pub mod agent_service;
+pub mod ai_score_service;
 pub mod annotation_service;
 pub mod common;
 pub mod kline_query_service;

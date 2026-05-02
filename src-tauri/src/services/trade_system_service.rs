@@ -1,11 +1,19 @@
+use crate::app_state::AppState;
+use crate::db::duckdb::DuckConnection;
 use crate::error::{AppError, AppResult};
+use crate::llm::client::{call_model, ModelCallOptions};
 use crate::models::{
-    CompletenessReport, ExportResult, OkResult, TradeSystemDetail, TradeSystemDraft,
-    TradeSystemSummary, TradeSystemVersion,
+    ChatMessage, CompletenessReport, ExportResult, OkResult, TradeSystemDetail, TradeSystemDraft,
+    TradeSystemRevisionInput, TradeSystemRevisionProposal, TradeSystemStock, TradeSystemSummary,
+    TradeSystemVersion,
 };
 use crate::services::common::{new_id, now_iso, sha256_hex};
+use crate::services::kline_query_service::resolve_symbol;
+use crate::services::model_provider_service::{get_active_provider, resolve_api_key};
+use chrono::{Datelike, Duration, Local, Timelike, Weekday};
+use duckdb::OptionalExt as DuckOptionalExt;
 use rusqlite::{params, Connection, OptionalExtension};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub fn list_trade_systems(conn: &Connection) -> AppResult<Vec<TradeSystemSummary>> {
     let mut stmt = conn.prepare(
@@ -14,11 +22,17 @@ pub fn list_trade_systems(conn: &Connection) -> AppResult<Vec<TradeSystemSummary
                ts.name,
                ts.description,
                ts.active_version_id,
-               v.version,
+               coalesce(v.version, ts.version),
                v.completeness_status,
+               (select count(*)
+                  from trade_system_stocks tss
+                 where tss.trade_system_id = ts.id) as stock_count,
+               ts.system_path,
+               ts.persona_path,
                ts.updated_at
           from trade_systems ts
           left join trade_system_versions v on v.id = ts.active_version_id
+         where coalesce(ts.status, 'active') = 'active'
          order by ts.updated_at desc
         "#,
     )?;
@@ -30,7 +44,10 @@ pub fn list_trade_systems(conn: &Connection) -> AppResult<Vec<TradeSystemSummary
             active_version_id: row.get(3)?,
             active_version: row.get(4)?,
             completeness_status: row.get(5)?,
-            updated_at: row.get(6)?,
+            stock_count: row.get(6)?,
+            system_path: row.get(7)?,
+            persona_path: row.get(8)?,
+            updated_at: row.get(9)?,
         })
     })?;
     collect_rows(rows)
@@ -39,7 +56,12 @@ pub fn list_trade_systems(conn: &Connection) -> AppResult<Vec<TradeSystemSummary
 pub fn get_trade_system(conn: &Connection, trade_system_id: &str) -> AppResult<TradeSystemDetail> {
     let mut detail = conn
         .query_row(
-            "select id, name, description, active_version_id, created_at, updated_at from trade_systems where id = ?1",
+            r#"
+            select id, name, description, active_version_id, version, system_md, system_path,
+                   persona_md, persona_path, created_at, updated_at
+              from trade_systems
+             where id = ?1 and coalesce(status, 'active') = 'active'
+            "#,
             params![trade_system_id],
             |row| {
                 Ok(TradeSystemDetail {
@@ -47,8 +69,13 @@ pub fn get_trade_system(conn: &Connection, trade_system_id: &str) -> AppResult<T
                     name: row.get(1)?,
                     description: row.get(2)?,
                     active_version_id: row.get(3)?,
-                    created_at: row.get(4)?,
-                    updated_at: row.get(5)?,
+                    active_version: row.get(4)?,
+                    system_md: row.get(5)?,
+                    system_path: row.get(6)?,
+                    persona_md: row.get(7)?,
+                    persona_path: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
                     versions: Vec::new(),
                 })
             },
@@ -182,39 +209,110 @@ pub fn check_completeness(markdown: &str) -> CompletenessReport {
 
 pub fn save_version(
     conn: &Connection,
+    app_dir: &Path,
     trade_system_id: Option<String>,
     name: String,
     markdown: String,
     change_summary: Option<String>,
 ) -> AppResult<TradeSystemVersion> {
     let now = now_iso();
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::new("invalid_input", "交易系统名称不能为空", true));
+    }
+
     let system_id = trade_system_id.unwrap_or_else(|| new_id("ts"));
-    let existing: Option<String> = conn
+    let existing: Option<(String, Option<String>)> = conn
         .query_row(
-            "select id from trade_systems where id = ?1",
+            "select id, status from trade_systems where id = ?1",
             params![system_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
 
+    if let Some((_, status)) = &existing {
+        if status.as_deref() == Some("deleted") {
+            return Err(AppError::new(
+                "invalid_state",
+                "交易系统已删除，不能继续发布版本",
+                true,
+            ));
+        }
+    }
+
+    let conflicting_active_id: Option<String> = conn
+        .query_row(
+            "select id from trade_systems where name = ?1 and coalesce(status, 'active') = 'active' and id <> ?2 limit 1",
+            params![name, system_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if conflicting_active_id.is_some() {
+        return Err(AppError::new(
+            "duplicate_name",
+            "已存在同名交易系统 Agent",
+            true,
+        ));
+    }
+
+    let persona_md = existing_persona(conn, &system_id)?
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| default_persona_markdown(&name));
+    let (system_path, persona_path) =
+        write_agent_documents(app_dir, &name, &markdown, &persona_md)?;
+
     if existing.is_none() {
         conn.execute(
-            "insert into trade_systems (id, name, description, active_version_id, created_at, updated_at) values (?1, ?2, null, null, ?3, ?3)",
-            params![system_id, name, now],
+            r#"
+            insert into trade_systems
+              (id, name, description, active_version_id, version, system_md, system_path,
+               persona_md, persona_path, status, created_at, updated_at)
+            values (?1, ?2, null, null, 1, ?3, ?4, ?5, ?6, 'active', ?7, ?7)
+            "#,
+            params![
+                system_id,
+                name,
+                markdown,
+                system_path.to_string_lossy().to_string(),
+                persona_md,
+                persona_path.to_string_lossy().to_string(),
+                now
+            ],
         )?;
     } else {
         conn.execute(
-            "update trade_systems set name = ?1, updated_at = ?2 where id = ?3",
-            params![name, now, system_id],
+            r#"
+            update trade_systems
+               set name = ?1,
+                   system_md = ?2,
+                   system_path = ?3,
+                   persona_md = ?4,
+                   persona_path = ?5,
+                   status = 'active',
+                   updated_at = ?6
+             where id = ?7
+            "#,
+            params![
+                name,
+                markdown,
+                system_path.to_string_lossy().to_string(),
+                persona_md,
+                persona_path.to_string_lossy().to_string(),
+                now,
+                system_id
+            ],
         )?;
     }
 
-    let next_version: i64 = conn
-        .query_row(
+    let next_version = if existing.is_some() {
+        conn.query_row(
             "select coalesce(max(version), 0) + 1 from trade_system_versions where trade_system_id = ?1",
             params![system_id],
             |row| row.get(0),
-        )?;
+        )?
+    } else {
+        next_version_for_name(conn, &name)?
+    };
     let report = check_completeness(&markdown);
     let report_json = serde_json::to_string(&report)?;
     let version_id = new_id("tsv");
@@ -239,10 +337,90 @@ pub fn save_version(
         ],
     )?;
     conn.execute(
-        "update trade_systems set active_version_id = ?1, updated_at = ?2 where id = ?3",
-        params![version_id, now, system_id],
+        "update trade_systems set active_version_id = ?1, version = ?2, updated_at = ?3 where id = ?4",
+        params![version_id, next_version, now, system_id],
     )?;
     get_version(conn, &version_id)
+}
+
+fn next_version_for_name(conn: &Connection, name: &str) -> AppResult<i64> {
+    conn.query_row(
+        r#"
+        select coalesce(max(version), 0) + 1
+          from (
+            select version
+              from trade_systems
+             where name = ?1
+            union all
+            select v.version
+              from trade_system_versions v
+              join trade_systems ts on ts.id = v.trade_system_id
+             where ts.name = ?1
+          )
+        "#,
+        params![name],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
+}
+
+fn existing_persona(conn: &Connection, trade_system_id: &str) -> AppResult<Option<String>> {
+    let value: Option<Option<String>> = conn
+        .query_row(
+            "select persona_md from trade_systems where id = ?1",
+            params![trade_system_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(value.flatten())
+}
+
+fn default_persona_markdown(name: &str) -> String {
+    format!(
+        r#"# {name} Agent 人格
+
+你是交易系统「{name}」的执行 Agent。你的任务是严格依据 system.md 中定义的边界、数据能力、评分规则和交易计划规则，对关联标的进行一致、可追溯、可复盘的评估。
+
+## 行为准则
+
+- 不补写 system.md 中不存在的规则。
+- 数据不足时明确标记不可评分或需要人工确认。
+- 输出必须区分事实、规则命中、推断和不确定性。
+- 不承诺收益，不给出脱离风险预算的建议。
+"#
+    )
+}
+
+fn write_agent_documents(
+    app_dir: &Path,
+    name: &str,
+    system_md: &str,
+    persona_md: &str,
+) -> AppResult<(PathBuf, PathBuf)> {
+    let agent_dir = app_dir.join("agents").join(safe_agent_dir_name(name));
+    std::fs::create_dir_all(&agent_dir)?;
+    let system_path = agent_dir.join("system.md");
+    let persona_path = agent_dir.join("persona.md");
+    std::fs::write(&system_path, system_md)?;
+    std::fs::write(&persona_path, persona_md)?;
+    Ok((system_path, persona_path))
+}
+
+fn safe_agent_dir_name(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .map(|ch| match ch {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ if ch.is_control() => '_',
+            _ => ch,
+        })
+        .collect();
+    let trimmed = sanitized.trim();
+    if trimmed.is_empty() {
+        "untitled".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 pub fn export_version(
@@ -263,14 +441,78 @@ pub fn export_version(
     })
 }
 
+pub async fn propose_revision(
+    state: &AppState,
+    input: TradeSystemRevisionInput,
+) -> AppResult<TradeSystemRevisionProposal> {
+    let provider = {
+        let conn = state.sqlite.lock().expect("sqlite lock");
+        get_active_provider(&conn)?
+            .ok_or_else(|| AppError::new("provider_request_failed", "未配置活跃模型 Provider", true))?
+    };
+    let api_key = resolve_api_key(&state.app_dir, &provider)?;
+    let system_prompt = build_revision_system_prompt(&input.name, &input.current_markdown);
+    let mut messages = input.messages;
+    if messages.is_empty() {
+        messages.push(ChatMessage {
+            role: "user".to_string(),
+            content: "请检查当前交易系统草稿，并提出下一步需要补齐的问题。".to_string(),
+        });
+    }
+    let content = call_model(
+        &state.http,
+        &provider,
+        &api_key,
+        ModelCallOptions {
+            system_prompt,
+            messages,
+            response_format: Some("json_object".to_string()),
+            temperature: Some(provider.temperature),
+            max_tokens: Some(provider.max_tokens),
+        },
+    )
+    .await?;
+    let value: serde_json::Value = serde_json::from_str(&content)?;
+    Ok(TradeSystemRevisionProposal {
+        assistant_message: value
+            .get("assistantMessage")
+            .or_else(|| value.get("assistant_message"))
+            .and_then(|node| node.as_str())
+            .unwrap_or("已生成交易系统修订建议。")
+            .to_string(),
+        markdown: value
+            .get("markdown")
+            .and_then(|node| node.as_str())
+            .unwrap_or(&input.current_markdown)
+            .to_string(),
+        diff: value
+            .get("diff")
+            .and_then(|node| node.as_str())
+            .unwrap_or("")
+            .to_string(),
+        gap_questions: value
+            .get("gapQuestions")
+            .or_else(|| value.get("gap_questions"))
+            .and_then(|node| node.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(ToString::to_string))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    })
+}
+
 pub fn add_stocks(
     conn: &Connection,
+    duck: &DuckConnection,
     trade_system_id: &str,
-    stock_codes: Vec<String>,
+    symbols: Vec<String>,
 ) -> AppResult<OkResult> {
     let exists: Option<String> = conn
         .query_row(
-            "select id from trade_systems where id = ?1",
+            "select id from trade_systems where id = ?1 and coalesce(status, 'active') = 'active'",
             params![trade_system_id],
             |row| row.get(0),
         )
@@ -280,14 +522,278 @@ pub fn add_stocks(
     }
 
     let now = now_iso();
-    for stock_code in stock_codes {
+    for symbol in symbols {
+        let symbol = resolve_symbol(duck, &symbol)?;
+        let id = new_id("tss");
         conn.execute(
-            "insert or ignore into trade_system_stocks (trade_system_id, stock_code, created_at)
-             values (?1, ?2, ?3)",
-            params![trade_system_id, stock_code, now],
+            r#"
+            insert into trade_system_stocks (id, trade_system_id, symbol, updated_at)
+            values (?1, ?2, ?3, ?4)
+            on conflict(trade_system_id, symbol) do update set updated_at = excluded.updated_at
+            "#,
+            params![id, trade_system_id, symbol, now],
         )?;
     }
     Ok(OkResult { ok: true })
+}
+
+fn build_revision_system_prompt(name: &str, current_markdown: &str) -> String {
+    let template = include_str!("../../../docs/trading-system-template.md");
+    format!(
+        r#"你是 trade-system-0 的交易系统编辑 Agent。你的任务是用缺口问答的方式帮助用户把交易系统补齐到可评分、可复盘、可追溯。
+
+工作规则：
+- 必须以仓库模板为准，不要发明模板外的核心结构。
+- 优先发现会阻止评分、风控或复盘的缺口，每次最多追问 3 个关键问题。
+- 如果用户已经给出足够信息，直接把信息整合进 Markdown。
+- 只返回 JSON 对象，不返回 Markdown 代码块。
+- JSON 必须包含 assistantMessage、markdown、diff、gapQuestions。
+- markdown 是完整交易系统 Markdown，不是片段；如果只需要追问，可以保持原文不变。
+- diff 用简短中文说明本轮改动或为什么暂不改。
+
+交易系统名称：{name}
+
+模板：
+{template}
+
+当前 Markdown：
+{current_markdown}
+
+请严格输出如下 JSON 形状：
+{{
+  "assistantMessage": "面向用户的一段简短说明或追问",
+  "markdown": "完整 Markdown",
+  "diff": "本轮变更摘要",
+  "gapQuestions": ["问题1", "问题2"]
+}}
+"#
+    )
+}
+
+pub fn remove_stock(conn: &Connection, trade_system_id: &str, symbol: &str) -> AppResult<OkResult> {
+    conn.execute(
+        "delete from trade_system_stocks where trade_system_id = ?1 and symbol = ?2",
+        params![trade_system_id, symbol],
+    )?;
+    Ok(OkResult { ok: true })
+}
+
+pub fn delete_trade_system(
+    conn: &Connection,
+    app_dir: &Path,
+    trade_system_id: &str,
+) -> AppResult<OkResult> {
+    let (name, system_path, persona_path): (String, Option<String>, Option<String>) = conn
+        .query_row(
+            "select name, system_path, persona_path from trade_systems where id = ?1 and coalesce(status, 'active') = 'active'",
+            params![trade_system_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?
+        .ok_or_else(|| AppError::new("not_found", "交易系统不存在或已删除", true))?;
+
+    conn.execute(
+        "update trade_systems set status = 'deleted', deleted_at = datetime('now'), updated_at = datetime('now') where id = ?1",
+        params![trade_system_id],
+    )?;
+
+    let agent_root = app_dir.join("agents");
+    let dir = system_path
+        .as_deref()
+        .and_then(|value| Path::new(value).parent().map(Path::to_path_buf))
+        .or_else(|| {
+            persona_path
+                .as_deref()
+                .and_then(|value| Path::new(value).parent().map(Path::to_path_buf))
+        })
+        .unwrap_or_else(|| agent_root.join(safe_agent_dir_name(&name)));
+
+    if dir.starts_with(&agent_root) && dir.exists() {
+        std::fs::remove_dir_all(dir)?;
+    }
+
+    Ok(OkResult { ok: true })
+}
+
+pub fn list_trade_system_stocks(
+    conn: &Connection,
+    duck: &DuckConnection,
+    trade_system_id: &str,
+) -> AppResult<Vec<TradeSystemStock>> {
+    let mut stmt = conn.prepare(
+        r#"
+        select id, trade_system_id, symbol, latest_score, previous_report, previous_report_path,
+               latest_report, latest_report_path, latest_score_date, updated_at
+          from trade_system_stocks
+         where trade_system_id = ?1
+         order by latest_score desc nulls last, updated_at desc
+        "#,
+    )?;
+    let rows = stmt.query_map(params![trade_system_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<i32>>(3)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, Option<String>>(6)?,
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, Option<String>>(8)?,
+            row.get::<_, Option<String>>(9)?,
+        ))
+    })?;
+
+    let mut values = Vec::new();
+    for row in rows {
+        let (
+            id,
+            ts_id,
+            symbol,
+            latest_score,
+            previous_report,
+            previous_report_path,
+            latest_report,
+            latest_report_path,
+            latest_score_date,
+            updated_at,
+        ) = row?;
+        let meta = enrich_stock_meta(duck, &symbol)?;
+        values.push(TradeSystemStock {
+            id,
+            trade_system_id: ts_id,
+            symbol,
+            code: meta.code,
+            name: meta.name,
+            exchange: meta.exchange,
+            industry: meta.industry,
+            latest_score,
+            previous_report,
+            previous_report_path,
+            latest_report,
+            latest_report_path,
+            latest_score_date,
+            latest_price: meta.latest_price,
+            change_pct: meta.change_pct,
+            updated_at,
+        });
+    }
+    Ok(values)
+}
+
+pub fn update_trade_system_stock_review(
+    conn: &Connection,
+    trade_system_id: &str,
+    symbol: &str,
+    latest_score: Option<i64>,
+    latest_report: String,
+    latest_report_path: Option<String>,
+) -> AppResult<()> {
+    let now = now_iso();
+    let score_date = score_date_for_now();
+    let id = new_id("tss");
+    conn.execute(
+        r#"
+        insert into trade_system_stocks
+          (id, trade_system_id, symbol, latest_score, latest_report, latest_report_path,
+           latest_score_date, updated_at)
+        values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        on conflict(trade_system_id, symbol) do update set
+          previous_report = trade_system_stocks.latest_report,
+          previous_report_path = trade_system_stocks.latest_report_path,
+          latest_score = excluded.latest_score,
+          latest_report = excluded.latest_report,
+          latest_report_path = excluded.latest_report_path,
+          latest_score_date = excluded.latest_score_date,
+          updated_at = excluded.updated_at
+        "#,
+        params![
+            id,
+            trade_system_id,
+            symbol,
+            latest_score,
+            latest_report,
+            latest_report_path,
+            score_date,
+            now
+        ],
+    )?;
+    Ok(())
+}
+
+struct StockMetaSnapshot {
+    code: String,
+    name: String,
+    exchange: Option<String>,
+    industry: Option<String>,
+    latest_price: Option<f64>,
+    change_pct: Option<f64>,
+}
+
+fn enrich_stock_meta(duck: &DuckConnection, symbol: &str) -> AppResult<StockMetaSnapshot> {
+    let fallback_code = symbol.split('.').next().unwrap_or(symbol).to_string();
+    let row = duck
+        .query_row(
+            r#"
+            with latest as (
+              select symbol, max(trade_date) as latest_date
+                from kline_bars
+               where symbol = ?1 and period = '1d' and adj_mode = 'none'
+               group by symbol
+            ),
+            latest_bar as (
+              select b.symbol, b.close, b.change_pct
+                from kline_bars b
+                join latest l on l.symbol = b.symbol and l.latest_date = b.trade_date
+               where b.period = '1d' and b.adj_mode = 'none'
+            )
+            select s.code, s.name, s.exchange, s.industry, lb.close, lb.change_pct
+              from securities s
+              left join latest_bar lb on lb.symbol = s.symbol
+             where s.symbol = ?1
+             limit 1
+            "#,
+            duckdb::params![symbol],
+            |row| {
+                Ok(StockMetaSnapshot {
+                    code: row.get(0)?,
+                    name: row.get(1)?,
+                    exchange: row.get(2)?,
+                    industry: row.get(3)?,
+                    latest_price: row.get(4)?,
+                    change_pct: row.get(5)?,
+                })
+            },
+        )
+        .optional()?;
+
+    Ok(row.unwrap_or(StockMetaSnapshot {
+        code: fallback_code.clone(),
+        name: fallback_code,
+        exchange: None,
+        industry: None,
+        latest_price: None,
+        change_pct: None,
+    }))
+}
+
+pub fn score_date_for_now() -> String {
+    let now = Local::now();
+    let today = now.date_naive();
+    let is_weekday = !matches!(today.weekday(), Weekday::Sat | Weekday::Sun);
+    if !is_weekday {
+        return today.format("%Y-%m-%d").to_string();
+    }
+
+    if now.hour() >= 15 {
+        return today.format("%Y-%m-%d").to_string();
+    }
+
+    let mut day = today - Duration::days(1);
+    while matches!(day.weekday(), Weekday::Sat | Weekday::Sun) {
+        day -= Duration::days(1);
+    }
+    day.format("%Y-%m-%d").to_string()
 }
 
 pub fn generate_draft_from_materials(

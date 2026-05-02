@@ -9,6 +9,7 @@ pub struct AppState {
     pub sqlite: Mutex<SqliteConnection>,
     pub duckdb: Mutex<duckdb::DuckConnection>,
     pub http: reqwest::Client,
+    pub ai_score_worker_running: Mutex<bool>,
 }
 
 impl AppState {
@@ -17,6 +18,7 @@ impl AppState {
 
         std::fs::create_dir_all(&app_dir)?;
         for child in [
+            "agents",
             "materials",
             "exports",
             "logs",
@@ -51,6 +53,7 @@ impl AppState {
             sqlite: Mutex::new(sqlite),
             duckdb: Mutex::new(duckdb),
             http: reqwest::Client::new(),
+            ai_score_worker_running: Mutex::new(false),
         })
     }
 }
