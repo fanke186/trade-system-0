@@ -5,7 +5,8 @@ Tauri 2 桌面应用，帮助用户构建个人交易系统并生成专属 AI Ag
 ## 核心红线
 
 - 交易系统 Markdown 是单一事实源（SSOT），Agent 只能按 Markdown 规则分析，不得自行补充。
-- K 线数据由 `market-sync`（独立项目，`~/data/market-sync/`）每日盘后自动同步到 `~/.data/duckdb/market/market.duckdb`。首次使用运行 `scripts/init_sync.sh` 初始化，后续通过 `refresh_from_market` 增量同步（只拉 `trade_date > last_kline_date` 的新数据）。评分和图表只读查询本地 DuckDB，不得隐式下载数据。
+- K 线数据由 `market-sync`（独立项目，`~/data/market-sync/`）每日盘后自动同步到 `~/.data/duckdb/market/market.duckdb`。首次使用运行 `scripts/init_sync.sh` 初始化，后续通过 `refresh_from_market` 增量同步（只拉 `trade_date > last_kline_date` 的新数据）。DuckDB 连接设 `memory_limit='1GB'` 防止 ATTACH 大库后查询内存飙升。评分和图表只读查询本地 DuckDB，不得隐式下载数据。
+- 证券唯一标识为 `symbol = code.exchange`（如 `000001.SZ`、`000001.SH`）。所有命令入口必须先调 `resolve_symbol` 归一化用户输入再查询。自选股 `stock_code` 字段存归一化后的 symbol。
 - 支持日 K、周 K、月 K、季 K、年 K（1d/1w/1M/1Q/1Y），不接入分钟线、实时行情或交易执行。
 - 所有设计决策以当前项目代码和 `docs/architecture.md` 为准。
 
@@ -40,11 +41,13 @@ Tauri 2 桌面应用，帮助用户构建个人交易系统并生成专属 AI Ag
 
 ```
 src/                         # React + TypeScript 前端
-src/components/chart/        # K 线图表、工具栏、设置面板
+src/components/chart/        # K 线图表、工具栏、设置面板、十字光标
+src/components/trade-agents/ # 交易系统 Agent 列表、标的表格、评分面板、Chatbot 编辑窗口
 src/components/watchlist/    # 自选侧栏、股票信息面板
+src/lib/                     # 共享 hooks（useStockViewModel/useWatchlistViewModel）、命令封装、类型、工具
 src-tauri/src/commands/      # Tauri command IPC 层
 src-tauri/src/services/      # 业务编排层（含 market_sync_service）
-src-tauri/src/db/            # SQLite 应用状态 + DuckDB K 线
+src-tauri/src/db/            # SQLite 应用状态 + DuckDB K 线（memory_limit='1GB'）
 src-tauri/src/llm/           # OpenAI-compatible 客户端、Prompt、JSON guard
 src-tauri/src/models/        # 数据模型
 ```
