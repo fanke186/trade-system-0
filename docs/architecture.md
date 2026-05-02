@@ -27,7 +27,7 @@ DuckDB 核心表：
 
 | 表 | 说明 |
 |------|------|
-| `securities` | 标的元数据（symbol PK，含 market_symbol 指向 market-sync） |
+| `securities` | 标的元数据（含 latest_price/change_pct/latest_date 缓存、market_symbol） |
 | `kline_bars` | 统一 K 线表（symbol/period/adj_mode/trade_date 复合主键） |
 | `kline_mapping` | market-sync 映射表（trade_symbol ↔ app_symbol，同步水位） |
 | `trade_calendar` | 交易日历 |
