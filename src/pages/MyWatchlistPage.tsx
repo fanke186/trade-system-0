@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toErrorMessage } from '../lib/format'
 import { WatchlistSidebar } from '../components/watchlist/WatchlistSidebar'
 import { StockInfoPanel } from '../components/watchlist/StockInfoPanel'
@@ -8,8 +8,14 @@ import { ChartToolbar } from '../components/chart/ChartToolbar'
 import { SettingsPopover } from '../components/chart/SettingsPopover'
 import { CrosshairTooltip } from '../components/chart/CrosshairTooltip'
 import type { ChartSettings } from '../components/chart/SettingsPopover'
-import type { ChartAnnotation, ChartAnnotationPayload, KlineBar } from '../lib/types'
+import type { ChartAnnotation, ChartAnnotationPayload, KlineBar, Watchlist } from '../lib/types'
 import { commands } from '../lib/commands'
+import { useStockViewModel } from '../lib/useStockViewModel'
+import {
+  useWatchlistViewModel,
+  type WatchlistSortColumn,
+  type WatchlistSortDir,
+} from '../lib/useWatchlistViewModel'
 
 const DEFAULT_SETTINGS: ChartSettings = {
   maLines: [
@@ -47,8 +53,34 @@ export function MyWatchlistPage({
   const [drawingTool, setDrawingTool] = useState<'horizontal_line' | 'ray' | null>(null)
   const [crosshairBar, setCrosshairBar] = useState<KlineBar | null>(null)
   const [crosshairPos, setCrosshairPos] = useState<'top-left' | 'top-right'>('top-right')
+  const [selectedWatchlistId, setSelectedWatchlistId] = useState<string | undefined>()
+  const [sortColumn, setSortColumn] = useState<WatchlistSortColumn>('name')
+  const [sortDir, setSortDir] = useState<WatchlistSortDir>('asc')
 
   const queryClient = useQueryClient()
+  const watchlistView = useWatchlistViewModel({ selectedWatchlistId, sortColumn, sortDir })
+  const stockView = useStockViewModel({
+    symbol: stockCode,
+    versionId: selectedVersionId,
+    frequency,
+    adjMode,
+  })
+
+  useEffect(() => {
+    if (!selectedWatchlistId && watchlistView.watchlists.length > 0) {
+      setSelectedWatchlistId(watchlistView.watchlists[0].id)
+    }
+  }, [selectedWatchlistId, watchlistView.watchlists])
+
+  useEffect(() => {
+    if (watchlistView.rows.length === 0) return
+    const activeInCurrentWatchlist = watchlistView.rows.some(row => row.symbol === stockCode)
+    const firstSymbol = watchlistView.rows[0].symbol
+    if (!stockCode || !activeInCurrentWatchlist) {
+      onStockCodeChange(firstSymbol)
+    }
+  }, [onStockCodeChange, stockCode, watchlistView.rows])
+
   useEffect(() => {
     window.localStorage.setItem('qsgg.chartSettings', JSON.stringify(settings))
   }, [settings])
@@ -95,34 +127,100 @@ export function MyWatchlistPage({
     deleteMutation.mutate(annotation.id)
   }, [deleteMutation])
 
-  const meta = useQuery({
-    queryKey: ['stock-meta', stockCode],
-    queryFn: () => commands.getStockMeta(stockCode),
-    enabled: Boolean(stockCode),
+  const invalidateWatchlists = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['watchlists'] })
+  }, [queryClient])
+
+  const reorderMutation = useMutation({
+    mutationFn: ({ itemId, position }: { itemId: string; position: 'top' | 'bottom' }) =>
+      commands.reorderWatchlistItem(itemId, position),
+    onSuccess: invalidateWatchlists,
+  })
+  const removeMutation = useMutation({
+    mutationFn: async ({ watchlistId, symbols }: { watchlistId: string; symbols: string[] }) => {
+      await Promise.all(symbols.map(symbol => commands.removeWatchlistItem(watchlistId, symbol)))
+    },
+    onSuccess: invalidateWatchlists,
+  })
+  const copyMutation = useMutation({
+    mutationFn: async ({ itemIds, targetWatchlistId }: { itemIds: string[]; targetWatchlistId: string }) => {
+      await Promise.all(itemIds.map(itemId => commands.copyWatchlistItem(itemId, targetWatchlistId)))
+    },
+    onSuccess: invalidateWatchlists,
+  })
+  const createGroupMutation = useMutation({
+    mutationFn: (name: string) => commands.createWatchlistGroup(name),
+    onSuccess: watchlist => {
+      invalidateWatchlists()
+      setSelectedWatchlistId(watchlist.id)
+    },
+  })
+  const renameGroupMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => commands.renameWatchlistGroup(id, name),
+    onSuccess: invalidateWatchlists,
+  })
+  const deleteGroupMutation = useMutation({
+    mutationFn: (id: string) => commands.deleteWatchlistGroup(id),
+    onSuccess: () => {
+      setSelectedWatchlistId(undefined)
+      invalidateWatchlists()
+    },
   })
 
-  const barsQuery = useQuery({
-    queryKey: ['bars', stockCode, frequency, adjMode],
-    queryFn: () => commands.getBars(stockCode, frequency, undefined, undefined, 800, adjMode),
-    enabled: Boolean(stockCode),
-  })
+  const toggleSort = useCallback((column: WatchlistSortColumn) => {
+    if (sortColumn === column) {
+      setSortDir(dir => (dir === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortColumn(column)
+      setSortDir('asc')
+    }
+  }, [sortColumn])
 
-  const annotationsQuery = useQuery({
-    queryKey: ['annotations', stockCode, selectedVersionId],
-    queryFn: () => commands.listChartAnnotations(stockCode, selectedVersionId),
-    enabled: Boolean(stockCode),
-  })
+  const handleCreateGroup = useCallback(() => {
+    const name = window.prompt('新分组名称')?.trim()
+    if (name) createGroupMutation.mutate(name)
+  }, [createGroupMutation])
+
+  const handleRenameGroup = useCallback((watchlist: Watchlist) => {
+    const name = window.prompt('分组名称', watchlist.name)?.trim()
+    if (name && name !== watchlist.name) {
+      renameGroupMutation.mutate({ id: watchlist.id, name })
+    }
+  }, [renameGroupMutation])
+
+  const handleDeleteGroup = useCallback((watchlist: Watchlist) => {
+    if (watchlist.name === '我的自选') return
+    if (window.confirm(`删除分组「${watchlist.name}」？`)) {
+      deleteGroupMutation.mutate(watchlist.id)
+    }
+  }, [deleteGroupMutation])
 
   return (
     <div className="flex h-full gap-0 bg-background">
       {/* LEFT — 160px sidebar */}
-      <WatchlistSidebar stockCode={stockCode} onStockCodeChange={onStockCodeChange} />
+      <WatchlistSidebar
+        activeStockCode={stockCode}
+        watchlists={watchlistView.watchlists}
+        currentWatchlist={watchlistView.currentWatchlist}
+        rows={watchlistView.rows}
+        sortColumn={sortColumn}
+        sortDir={sortDir}
+        onWatchlistChange={setSelectedWatchlistId}
+        onToggleSort={toggleSort}
+        onStockCodeChange={onStockCodeChange}
+        onCreateGroup={handleCreateGroup}
+        onRenameGroup={handleRenameGroup}
+        onDeleteGroup={handleDeleteGroup}
+        onReorderItem={(itemId, position) => reorderMutation.mutate({ itemId, position })}
+        onRemoveItems={(watchlistId, symbols) => removeMutation.mutate({ watchlistId, symbols })}
+        onCopyItems={(itemIds, targetWatchlistId) => copyMutation.mutate({ itemIds, targetWatchlistId })}
+      />
 
       {/* CENTER — flex-1 chart area */}
       <div className="flex min-w-0 flex-1 flex-col">
           <ChartToolbar
-            stockName={meta.data?.name || stockCode}
-          stockCode={meta.data?.code ?? stockCode}
+            stockName={stockView.meta?.name || stockCode}
+          stockCode={stockView.meta?.code ?? stockCode}
           frequency={frequency}
           onFrequencyChange={setFrequency}
           adjMode={adjMode}
@@ -145,8 +243,8 @@ export function MyWatchlistPage({
 
         <div className="relative flex-1">
           <KLineChartPanel
-            bars={barsQuery.data ?? []}
-            annotations={annotationsQuery.data ?? []}
+            bars={stockView.bars}
+            annotations={stockView.annotations}
             drawingTool={drawingTool}
             onDrawComplete={handleDrawComplete}
             onAnnotationUpdate={handleAnnotationUpdate}
@@ -161,8 +259,8 @@ export function MyWatchlistPage({
           <CrosshairTooltip bar={crosshairBar} position={crosshairPos} />
         </div>
 
-        {barsQuery.isError ? (
-          <p className="mt-1 px-3 text-xs text-danger">{toErrorMessage(barsQuery.error)}</p>
+        {stockView.error ? (
+          <p className="mt-1 px-3 text-xs text-danger">{toErrorMessage(stockView.error)}</p>
         ) : null}
 
         {saveMutation.isError ? (
@@ -175,7 +273,14 @@ export function MyWatchlistPage({
       </div>
 
       {/* RIGHT — 240px stock info panel */}
-      <StockInfoPanel stockCode={stockCode} selectedVersionId={selectedVersionId} />
+      <StockInfoPanel
+        stockCode={stockCode}
+        selectedVersionId={selectedVersionId}
+        meta={stockView.meta}
+        reviews={stockView.reviews}
+        coverage={stockView.coverage}
+        coverageLoading={stockView.coverageLoading}
+      />
     </div>
   )
 }

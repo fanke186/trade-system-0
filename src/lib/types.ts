@@ -159,6 +159,16 @@ export type KlineBar = {
   change?: number | null
   changePct?: number | null
   amplitude?: number | null
+  ma?: Record<string, number | null>
+}
+
+export type SignalMarker = {
+  symbol: string
+  tradeDate: string
+  type: 'buy' | 'sell' | 'watch' | 'risk'
+  price?: number
+  label: string
+  score?: number
 }
 
 export type FrequencyCoverage = {
