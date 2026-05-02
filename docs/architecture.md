@@ -7,24 +7,19 @@
   - `components/chart/` — K线图表、工具栏、设置面板、悬浮详情。
   - `components/watchlist/` — 自选侧栏（分组/排序/右键菜单）、股票信息面板。
 - `src-tauri/src/commands/`：Tauri command IPC 层（含 `stock_meta`、`watchlist_ops` 等命令）。
-- `src-tauri/src/services/`：业务编排层（含 `kline_import_service` 负责 Parquet→DuckDB 导入，`csv_import_service` 负责 CSV→DuckDB 直接导入）。
+- `src-tauri/src/services/`：业务编排层（含 `market_sync_service` 负责从 market-sync DuckDB ATTACH + 物化）。
 - `src-tauri/src/db/`：SQLite、DuckDB 连接与迁移。
 - `src-tauri/src/llm/`：OpenAI-compatible 客户端、Prompt、JSON guard。
-- `scripts/sync_kline.py`：Python 同步脚本，通过 TickFlow SDK 批量拉取 A 股+指数 K 线，输出 Parquet。
 
-K 线数据源支持两种方式：
-
-1. **TickFlow API**（免费 tier `https://free-api.tickflow.org`）：Python 脚本 `sync_kline.py` 负责全量/增量同步、限流重试、进度上报，输出 Parquet。
-2. **本地 CSV 导入**（`import_csv_data` 命令）：Rust 端直接读取 `{code}_{name}_日K线历史.csv` 文件，自动计算 `pre_close`/`change`/`change_pct`/`amplitude`，批量写入 DuckDB。适用场景为已有离线 K 线数据、网络不稳定时快速导入。
+K 线数据由独立项目 **market-sync**（`~/data/market-sync/`）维护，每日 18:00 cron 自动从 TickFlow 拉取全市场日 K，存储到 `~/.data/duckdb/market/market.duckdb`。trade-system-0 不直接访问 TickFlow，只通过 `refresh_from_market` 命令从该 DuckDB 读取。
 
 评分与图表读取链路：
 
 ```text
-sync_kline (Python 脚本) -> TickFlow HTTP API -> Parquet -> kline_bars (DuckDB)
-import_csv_data (Rust) -> 本地 CSV 日K文件 -> 衍生字段计算 -> kline_bars (DuckDB)
+market-sync (cron) -> TickFlow API -> ~/.data/duckdb/market/market.duckdb (fact_kline)
+refresh_from_market (Rust) -> ATTACH market.duckdb -> symbol映射 + 衍生字段计算 -> kline_bars (trade-system-0 DuckDB)
 get_bars      -> DuckDB only（含复权参数 adj: pre|post|none）
-sync_securities_metadata -> eastmoney API -> securities (DuckDB, ~5000只A股)
-get_stock_meta -> securities (DuckDB) + kline_bars (DuckDB) -> 最新价/涨跌/陈旧检测
+get_stock_meta -> securities + kline_bars -> 最新价/涨跌/陈旧检测
 score_stock   -> coverage -> get_bars summaries (1d/1w/1M/1Q/1Y) -> LLM -> stock_reviews
 ```
 
@@ -32,8 +27,9 @@ DuckDB 核心表：
 
 | 表 | 说明 |
 |------|------|
-| `securities` | 标的元数据（symbol PK，code、name、exchange、board 等） |
+| `securities` | 标的元数据（symbol PK，含 market_symbol 指向 market-sync） |
 | `kline_bars` | 统一 K 线表（symbol/period/adj_mode/trade_date 复合主键） |
+| `kline_mapping` | market-sync 映射表（trade_symbol ↔ app_symbol，同步水位） |
 | `trade_calendar` | 交易日历 |
 | `kline_sync_runs` | 同步审计日志 |
 
@@ -82,8 +78,7 @@ graph TB
 
     subgraph Services["Services Layer — src-tauri/src/services/"]
         direction TB
-        SVC_SYNC[kline_sync_service<br/>Python 脚本编排<br/>进度上报 导入调度]
-        SVC_IMPORT[kline_import_service<br/>Parquet → DuckDB<br/>securities + bars + calendar]
+        SVC_MARKET[market_sync_service<br/>ATTACH market-sync DuckDB<br/>映射 物化 衍生字段计算]
         SVC_QUERY[kline_query_service<br/>K线只读查询<br/>覆盖率 标的列表]
         SVC_WL[watchlist_service<br/>自选分组 CRUD<br/>排序 拖拽]
         SVC_REVIEW[review_service<br/>评分 LLM 调用<br/>每日复盘]
@@ -108,17 +103,15 @@ graph TB
         MIG[migrations.rs<br/>DuckDB DDL 迁移]
     end
 
-    subgraph Python["Python Sync — scripts/sync_kline.py"]
+    subgraph MarketSync["market-sync — ~/data/market-sync/"]
         direction TB
-        PY_MAIN[main<br/>参数解析 编排调度]
-        PY_DISC[discover_instruments<br/>A股+指数发现]
-        PY_SYNC[sync_klines<br/>批量拉取 限流重试<br/>5期×3复权]
-        PY_WRITE[write_bars<br/>Parquet 输出]
+        MS_CRON[cron 18:00<br/>每日自动调度]
+        MS_SYNC[sync_daily.py<br/>增量+轮转全量同步]
+        MS_DB[market.duckdb<br/>fact_kline dim_instrument<br/>v_kline_weekly/monthly/yearly]
     end
 
     subgraph External["External APIs"]
-        TF[TickFlow API<br/>free-api.tickflow.org]
-        EM[eastmoney API<br/>证券元数据]
+        TF[TickFlow API<br/>api.tickflow.com]
         LLM_EXT[LLM Providers<br/>OpenAI / 兼容接口]
     end
 
@@ -138,10 +131,9 @@ graph TB
     INVOKE --> CMD_ANNO
 
     %% Commands → Services
-    CMD_KLINE --> SVC_SYNC
+    CMD_KLINE --> SVC_MARKET
     CMD_KLINE --> SVC_QUERY
-    CMD_DATA --> SVC_SYNC
-    CMD_DATA --> SVC_IMPORT
+    CMD_DATA --> SVC_MARKET
     CMD_DATA --> SVC_QUERY
     CMD_META --> SVC_QUERY
     CMD_WL --> SVC_WL
@@ -159,8 +151,7 @@ graph TB
     LLM_CLIENT --> LLM_GUARD
 
     %% Services → DB
-    SVC_SYNC --> DUCK
-    SVC_IMPORT --> DUCK
+    SVC_MARKET --> DUCK
     SVC_QUERY --> DUCK
     SVC_WL --> SQL
     SVC_WL --> DUCK
@@ -172,15 +163,9 @@ graph TB
     SVC_ANNO --> SQL
     MIG --> DUCK
 
-    %% Python → Services
-    SVC_SYNC -- spawns --> PY_MAIN
-
-    %% Python → External
-    PY_DISC --> TF
-    PY_SYNC --> TF
-
-    %% Services → External
-    SVC_IMPORT -.-> EM
+    %% MarketSync → External
+    MS_SYNC --> TF
+    SVC_MARKET -- ATTACH READ_ONLY --> MS_DB
 
     %% LLM → External
     LLM_CLIENT --> LLM_EXT
@@ -192,7 +177,7 @@ graph TB
     style Services fill:#121212,stroke:#ff6b35,color:#e0e0e0
     style LLM fill:#121212,stroke:#f0b93b,color:#e0e0e0
     style DB fill:#121212,stroke:#4d90fe,color:#e0e0e0
-    style Python fill:#121212,stroke:#ff6b35,color:#e0e0e0
+    style MarketSync fill:#121212,stroke:#ff6b35,color:#e0e0e0
     style External fill:#1a1a1a,stroke:#2a2a2a,color:#888888
 ```
 
@@ -204,26 +189,21 @@ sequenceDiagram
     participant FE as React 前端
     participant CMD as Tauri Command
     participant SVC as Service
-    participant PY as Python 脚本
-    participant TF as TickFlow API
     participant DUCK as DuckDB
     participant LLM as LLM Provider
 
     rect rgb(18, 18, 18)
-        Note over U,DUCK: K线同步链路
+        Note over U,DUCK: K线同步链路（market-sync）
         U->>FE: 点击"一键补齐"
-        FE->>CMD: invoke sync_kline('', 'incremental', 'incomplete')
-        CMD->>SVC: run_sync_script()
-        SVC->>PY: spawn python3 sync_kline.py
-        PY->>TF: TickFlow.klines.batch()
-        TF-->>PY: K线 JSON 数据
-        PY->>PY: enrich_bars → Parquet
-        PY-->>SVC: stdout JSON 进度事件
-        SVC-->>CMD: SyncScriptResult
-        CMD->>SVC: import_and_finalize()
-        SVC->>DUCK: INSERT kline_bars FROM Parquet
-        CMD-->>FE: KlineSyncResult
-        FE->>FE: invalidate queries
+        FE->>CMD: invoke refresh_from_market
+        CMD->>SVC: refresh_from_market()
+        SVC->>SVC: ATTACH ~/.data/duckdb/market/market.duckdb (READ_ONLY)
+        SVC->>DUCK: 更新 kline_mapping（symbol映射+水位）
+        SVC->>DUCK: INSERT kline_bars（窗口函数计算衍生字段）
+        SVC->>DUCK: 聚合 1w/1M/1Q/1Y
+        SVC->>DUCK: DETACH
+        SVC-->>CMD: KlineSyncResult
+        CMD-->>FE: invalidate queries
     end
 
     rect rgb(18, 18, 18)
