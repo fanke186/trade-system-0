@@ -9,7 +9,29 @@ pub fn open(path: &Path) -> AppResult<DuckConnection> {
     let conn = Connection::open(path).inspect_err(|e| {
         tracing::error!(error = %e, path = %path.display(), "DuckDB 连接失败");
     })?;
+    configure_runtime(&conn, path)?;
     Ok(conn)
+}
+
+fn configure_runtime(conn: &DuckConnection, path: &Path) -> AppResult<()> {
+    let temp_dir = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("cache")
+        .join("duckdb-temp");
+    std::fs::create_dir_all(&temp_dir)?;
+    let temp_dir = temp_dir.to_string_lossy().replace('\'', "''");
+    conn.execute_batch(&format!(
+        r#"
+        set memory_limit = '1GB';
+        set threads = 2;
+        set preserve_insertion_order = false;
+        set temp_directory = '{}';
+        "#,
+        temp_dir
+    ))?;
+    tracing::info!("DuckDB runtime 已限制 memory_limit=1GB threads=2");
+    Ok(())
 }
 
 pub fn run_migrations(conn: &DuckConnection) -> AppResult<()> {
@@ -231,6 +253,8 @@ pub fn run_migrations(conn: &DuckConnection) -> AppResult<()> {
 fn rebuild_securities_table(conn: &DuckConnection) -> AppResult<()> {
     conn.execute_batch(
         r#"
+        begin transaction;
+        drop table if exists securities_rebuilt;
         create table securities_rebuilt (
           symbol text primary key,
           code text not null,
@@ -297,6 +321,7 @@ fn rebuild_securities_table(conn: &DuckConnection) -> AppResult<()> {
         alter table securities_rebuilt rename to securities;
         create index if not exists idx_securities_code_name on securities(code, name);
         create index if not exists idx_kline_bars_lookup on kline_bars(symbol, period, adj_mode, trade_date);
+        commit;
         "#,
     )?;
     Ok(())
