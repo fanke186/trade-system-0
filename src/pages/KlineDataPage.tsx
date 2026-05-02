@@ -28,7 +28,8 @@ function DataHealthBanner() {
       void queryClient.invalidateQueries({ queryKey: ['securities'] })
       void queryClient.invalidateQueries({ queryKey: ['stock-meta'] })
       void queryClient.invalidateQueries({ queryKey: ['bars'] })
-    }
+    },
+    onSettled: () => setProgress(100)
   })
 
   useEffect(() => {
@@ -39,7 +40,7 @@ function DataHealthBanner() {
       message?: string
     }>('kline-sync-progress', event => {
       if (event.payload.stockCode === '') {
-        setProgress(event.payload.percent)
+        setProgress(event.payload.status === 'completed' || event.payload.status === 'error' ? 100 : event.payload.percent)
       }
     })
     return () => {

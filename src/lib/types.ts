@@ -90,6 +90,7 @@ export type ModelProvider = {
   providerType: string
   baseUrl: string
   apiKeyRef: string
+  apiKeyHint?: string | null
   model: string
   temperature: number
   maxTokens: number

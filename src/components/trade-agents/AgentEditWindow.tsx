@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Bot, Check, Loader2, Send, Sparkles, User, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -39,6 +39,7 @@ export function AgentEditWindow({
   const [userMessage, setUserMessage] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [assistantDraft, setAssistantDraft] = useState<AssistantDraft | null>(null)
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!target) return
@@ -71,6 +72,10 @@ export function AgentEditWindow({
       detail.versions.find(version => version.id === detail.activeVersionId) ?? detail.versions[0]
     setMarkdown(detail.systemMd || active?.markdown || starterMarkdown(detail.name))
   }, [detail, target])
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [messages])
 
   const completenessQuery = useQuery({
     queryKey: ['trade-agent-completeness', markdown],
@@ -162,7 +167,14 @@ export function AgentEditWindow({
             <Button icon={<Check className="h-4 w-4" />} onClick={() => publishMutation.mutate()} variant="primary">
               发布
             </Button>
-            <Button aria-label="关闭" icon={<X className="h-4 w-4" />} onClick={onClose} size="icon" variant="ghost" />
+            <button
+              aria-label="关闭"
+              className="flex h-9 w-9 items-center justify-center border border-danger/50 bg-danger/10 text-danger transition hover:bg-danger hover:text-panel focus-visible:shadow-focus"
+              onClick={onClose}
+              type="button"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
         </div>
 
@@ -240,6 +252,7 @@ export function AgentEditWindow({
                     </div>
                   </div>
                 ) : null}
+                <div ref={messagesEndRef} />
               </div>
             </div>
 

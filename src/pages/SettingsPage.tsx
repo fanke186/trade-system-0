@@ -85,7 +85,7 @@ const providerDefaults = providerPresets[0].input
 export function SettingsPage() {
   const queryClient = useQueryClient()
   const [form, setForm] = useState<SaveModelProviderInput>(providerDefaults)
-  const [selectedProviderId, setSelectedProviderId] = useState<string>()
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null | undefined>()
   const [selectedPresetId, setSelectedPresetId] = useState('deepseek-pro')
 
   const providersQuery = useQuery({
@@ -101,7 +101,7 @@ export function SettingsPage() {
   )
 
   useEffect(() => {
-    if (!selectedProviderId && providers[0]) {
+    if (selectedProviderId === undefined && providers[0]) {
       setSelectedProviderId(providers[0].id)
     }
   }, [providers, selectedProviderId])
@@ -145,7 +145,7 @@ export function SettingsPage() {
   const applyPreset = (presetId: string) => {
     const preset = providerPresets.find(item => item.id === presetId) ?? providerPresets[0]
     setSelectedPresetId(preset.id)
-    setSelectedProviderId(undefined)
+    setSelectedProviderId(null)
     setForm({ ...preset.input, id: undefined })
   }
 
@@ -166,6 +166,30 @@ export function SettingsPage() {
   return (
     <div className="grid min-h-full grid-cols-[360px_minmax(0,1fr)] gap-4">
       <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-4">
+        <Panel
+          title="Provider Connections"
+          action={<Badge tone={activeProvider ? 'success' : 'warning'}>{activeProvider ? 'ON' : '未配置'}</Badge>}
+          className="min-h-0"
+        >
+          <div className="grid max-h-[calc(100vh-368px)] gap-2 overflow-auto pr-1">
+            {providers.map(provider => (
+              <ProviderCard
+                key={provider.id}
+                provider={provider}
+                selected={provider.id === selectedProviderId}
+                onSelect={() => setSelectedProviderId(provider.id)}
+                onActivate={() => activeMutation.mutate(provider.id)}
+                onTest={() => testMutation.mutate(provider.id)}
+              />
+            ))}
+            {providers.length === 0 ? (
+              <div className="border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+                暂无连接
+              </div>
+            ) : null}
+          </div>
+        </Panel>
+
         <Panel
           title="Provider Presets"
           action={
@@ -199,30 +223,6 @@ export function SettingsPage() {
                 </div>
               </button>
             ))}
-          </div>
-        </Panel>
-
-        <Panel
-          title="Provider Connections"
-          action={<Badge tone={activeProvider ? 'success' : 'warning'}>{activeProvider?.name ?? '未配置'}</Badge>}
-          className="min-h-0"
-        >
-          <div className="grid max-h-[calc(100vh-368px)] gap-2 overflow-auto pr-1">
-            {providers.map(provider => (
-              <ProviderCard
-                key={provider.id}
-                provider={provider}
-                selected={provider.id === selectedProviderId}
-                onSelect={() => setSelectedProviderId(provider.id)}
-                onActivate={() => activeMutation.mutate(provider.id)}
-                onTest={() => testMutation.mutate(provider.id)}
-              />
-            ))}
-            {providers.length === 0 ? (
-              <div className="border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-                暂无连接
-              </div>
-            ) : null}
           </div>
         </Panel>
       </section>
@@ -275,10 +275,15 @@ export function SettingsPage() {
               </Field>
               <div className="grid gap-4">
                 <Field label="API Key">
+                  {(selectedProvider?.apiKeyHint || form.apiKeyRef?.startsWith('local:')) && !form.apiKey ? (
+                    <div className="mb-1 text-[10px] font-mono text-success">
+                      {selectedProvider?.apiKeyHint ?? '已保存到本地 secrets'}
+                    </div>
+                  ) : null}
                   <Input
                     type="password"
                     value={form.apiKey ?? ''}
-                    placeholder={form.apiKeyRef?.startsWith('local:') ? '已保存到本地 secrets；重新输入可替换' : '输入后保存到本地 secrets'}
+                    placeholder={form.apiKeyRef?.startsWith('local:') ? '留空则不修改已保存的 Key' : '输入后保存到本地 secrets'}
                     onChange={event => setForm({ ...form, apiKey: event.target.value })}
                   />
                 </Field>
@@ -368,7 +373,7 @@ export function SettingsPage() {
             </div>
             <div className="grid gap-2 text-xs leading-5 text-muted-foreground">
               <div>当前选中：{selectedProvider?.name ?? '新连接'}</div>
-              <div>Key 来源：{form.apiKey || form.apiKeyRef?.startsWith('local:') ? '本地 secrets' : '未保存'}</div>
+              <div>Key 来源：{selectedProvider?.apiKeyHint ?? (form.apiKey ? '待保存到本地 secrets' : '未保存')}</div>
               {testMutation.data ? (
                 <div className={testMutation.data.ok ? 'text-success' : 'text-danger'}>
                   测试结果：{testMutation.data.ok ? 'ok' : 'failed'} / {testMutation.data.latencyMs ?? '-'}ms /{' '}
@@ -417,7 +422,11 @@ function ProviderCard({
           <div className="mt-1 truncate text-xs text-muted-foreground">{provider.model}</div>
         </div>
         <div className="flex shrink-0 gap-1">
-          {provider.isActive ? <Badge tone="info">active</Badge> : null}
+          {provider.isActive ? (
+            <span className="inline-flex h-7 items-center bg-success px-2 text-[10px] font-black tracking-wide text-panel">
+              ON
+            </span>
+          ) : null}
           {provider.enabled ? <Badge tone="success">on</Badge> : <Badge>off</Badge>}
         </div>
       </div>
