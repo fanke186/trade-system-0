@@ -206,6 +206,11 @@ pub fn run_migrations(conn: &DuckConnection) -> AppResult<()> {
         create index if not exists idx_kline_mapping_code on kline_mapping(code);
         create index if not exists idx_securities_market_symbol on securities(market_symbol);
 
+        alter table securities add column if not exists latest_price double;
+        alter table securities add column if not exists change_pct double;
+        alter table securities add column if not exists latest_date varchar;
+        insert or ignore into schema_migrations (id, applied_at)
+        values ('0005_securities_latest_price', current_timestamp);
         insert or ignore into schema_migrations (id, applied_at)
         values ('0004_market_sync_mapping', current_timestamp);
         insert or ignore into schema_migrations (id, applied_at)
@@ -247,6 +252,9 @@ fn rebuild_securities_table(conn: &DuckConnection) -> AppResult<()> {
           total_cap double,
           pe_ratio double,
           market_symbol text,
+          latest_price double,
+          change_pct double,
+          latest_date varchar,
           updated_at timestamp
         );
 
@@ -254,7 +262,7 @@ fn rebuild_securities_table(conn: &DuckConnection) -> AppResult<()> {
           (symbol, code, name, exchange, board, list_date, delist_date, status,
            industry, sub_industry, area, market_type, stock_type, total_shares,
            float_shares, tick_size, limit_up, limit_down, total_cap, pe_ratio,
-           market_symbol, updated_at)
+           market_symbol, latest_price, change_pct, latest_date, updated_at)
         select
           coalesce(nullif(symbol, ''), code || '.' || exchange),
           code,
@@ -277,6 +285,9 @@ fn rebuild_securities_table(conn: &DuckConnection) -> AppResult<()> {
           total_cap,
           pe_ratio,
           market_symbol,
+          latest_price,
+          change_pct,
+          latest_date,
           coalesce(updated_at, current_timestamp)
         from securities
         where coalesce(nullif(symbol, ''), code || '.' || exchange) is not null;

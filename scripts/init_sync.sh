@@ -83,7 +83,7 @@ info "MARKET_DB = $MARKET_DB"
 info "duckdb    = $(duckdb --version)"
 
 # ── 1. 确保 app DB 有基础表结构 ──────────────────────────
-step "1/7 检查表结构"
+step "1/8 检查表结构"
 if ! duckdb -c "select count(*) from kline_mapping" "$APP_DB" &>/dev/null; then
   info "kline_mapping 表不存在，正在创建..."
   duckdb "$APP_DB" <<'SQL'
@@ -140,7 +140,7 @@ else
 fi
 
 # ── 2. 同步映射表 ────────────────────────────────────────
-step "2/7 同步标的映射 (dim_instrument → kline_mapping)"
+step "2/8 同步标的映射"
 duckdb "$APP_DB" <<SQL
 attach '${MARKET_DB}' as market_db (read_only);
 
@@ -200,8 +200,68 @@ MAPPING_COUNT=$(duckdb -csv -noheader -c "select count(*) from kline_mapping" "$
 ok "映射完成，共 ${MAPPING_COUNT} 只标的"
 info "耗时 $(elapsed_since $START_TIME)s"
 
-# ── 3. 同步日 K ──────────────────────────────────────────
-step "3/7 同步日 K 线 (fact_kline → kline_bars)"
+# ── 3. 同步证券元数据 ────────────────────────────────────
+step "3/8 同步证券元数据 (dim_instrument → securities)"
+D1=$(date +%s)
+
+duckdb "$APP_DB" <<SQL
+attach '${MARKET_DB}' as market_db (read_only);
+
+insert into securities
+  (symbol, code, name, exchange, board, list_date, delist_date, status,
+   industry, market_type, stock_type, market_symbol, updated_at)
+select
+  m.app_symbol,
+  m.code,
+  coalesce(d.name, m.name, m.code),
+  m.exchange,
+  case
+    when coalesce(d.type, m.stock_type, 'stock') = 'index' then '指数'
+    when m.exchange = 'BJ' then '北交所'
+    when m.code like '688%' then '科创板'
+    when m.code like '300%' or m.code like '301%' then '创业板'
+    else '主板'
+  end,
+  d.list_date,
+  d.delist_date,
+  case when coalesce(d.is_active, true) then 'active' else 'inactive' end,
+  d.industry,
+  case
+    when coalesce(d.type, m.stock_type, 'stock') = 'index' then '指数'
+    when m.exchange = 'BJ' then '北交所'
+    when m.code like '688%' then '科创板'
+    when m.code like '300%' or m.code like '301%' then '创业板'
+    else '主板'
+  end,
+  coalesce(d.type, m.stock_type, 'stock'),
+  m.trade_symbol,
+  current_timestamp
+from kline_mapping m
+join market_db.dim_instrument d on d.symbol = m.trade_symbol
+on conflict(symbol) do update set
+  code = excluded.code,
+  name = excluded.name,
+  exchange = excluded.exchange,
+  board = excluded.board,
+  list_date = coalesce(excluded.list_date, securities.list_date),
+  delist_date = excluded.delist_date,
+  status = excluded.status,
+  industry = coalesce(excluded.industry, securities.industry),
+  market_type = excluded.market_type,
+  stock_type = excluded.stock_type,
+  market_symbol = excluded.market_symbol,
+  updated_at = excluded.updated_at;
+
+detach market_db;
+SQL
+
+SEC_COUNT=$(duckdb -csv -noheader -c "select count(*) from securities where status = 'active'" "$APP_DB")
+D2=$(date +%s)
+ok "证券元数据完成，共 ${SEC_COUNT} 只活跃标的"
+info "耗时 $((D2 - D1))s"
+
+# ── 4. 同步日 K ──────────────────────────────────────────
+step "4/8 同步日 K 线 (fact_kline → kline_bars)"
 info "首次同步需导入全量历史数据，可能需要几分钟..."
 
 PRE_COUNT=$(duckdb -csv -noheader -c "select count(*) from kline_bars" "$APP_DB")
@@ -262,7 +322,7 @@ ok "日 K 完成，新增 ${DAILY_NEW} 行（共 ${POST_COUNT} 行）"
 info "耗时 $((D2 - D1))s"
 
 # ── 4. 计算衍生字段 ──────────────────────────────────────
-step "4/7 计算衍生字段 (pre_close/change/amplitude)"
+step "5/8 计算衍生字段 (pre_close/change/amplitude)"
 D1=$(date +%s)
 
 duckdb "$APP_DB" <<'SQL'
@@ -303,7 +363,7 @@ ok "衍生字段计算完成"
 info "耗时 $((D2 - D1))s"
 
 # ── 5. 聚合周/月/季/年 K ─────────────────────────────────
-step "5/7 聚合周/月/季/年 K 线"
+step "6/8 聚合周/月/季/年 K 线"
 
 for period_info in "1w:week" "1M:month" "1Q:quarter" "1Y:year"; do
   PERIOD="${period_info%%:*}"
@@ -351,33 +411,64 @@ SQL
 done
 
 # ── 6. 交易日历 ──────────────────────────────────────────
-step "6/7 同步交易日历"
+step "7/8 同步交易日历"
 duckdb "$APP_DB" <<'SQL'
 insert or ignore into trade_calendar (trade_date, is_open)
-select distinct trade_date, true from kline_bars where period = '1d';
+select distinct trade_date, true
+  from kline_bars
+ where period = '1d'
+   and trade_date > coalesce((select max(trade_date) from trade_calendar), '1970-01-01');
 SQL
 
 CAL_COUNT=$(duckdb -csv -noheader -c "select count(*) from trade_calendar" "$APP_DB")
 ok "交易日历完成，共 ${CAL_COUNT} 天"
 
-# ── 7. 更新水位 + 审计记录 ───────────────────────────────
-step "7/7 更新同步水位与审计记录"
+# ── 7. 回写最新价到 securities ──────────────────────────
+step "7/8 回写标的最新价到 securities"
+D1=$(date +%s)
+
+duckdb "$APP_DB" <<'SQL'
+update securities
+set
+  latest_price = lb.close,
+  change_pct   = lb.change_pct,
+  latest_date  = cast(lb.trade_date as varchar)
+from (
+  select symbol, close, change_pct, trade_date
+  from kline_bars
+  where period = '1d' and adj_mode = 'none'
+    and (symbol, trade_date) in (
+      select symbol, max(trade_date)
+      from kline_bars
+      where period = '1d' and adj_mode = 'none'
+      group by symbol
+    )
+) lb
+where securities.symbol = lb.symbol;
+SQL
+
+D2=$(date +%s)
+ok "最新价回写完成"
+info "耗时 $((D2 - D1))s"
+
+# ── 8. 更新水位 + 审计记录 ───────────────────────────────
+step "8/8 更新同步水位与审计记录"
 
 TOTAL=$(duckdb -csv -noheader -c "select count(*) from kline_bars" "$APP_DB")
 
 duckdb "$APP_DB" <<SQL
 update kline_mapping
 set last_sync_at    = current_timestamp,
-    last_kline_date = (
+    last_kline_date = coalesce((
       select max(trade_date) from kline_bars b
        where b.symbol = kline_mapping.app_symbol
          and b.period = '1d' and b.adj_mode = 'none'
-    ),
-    kline_count = (
+    ), (select max(trade_date) from kline_bars where period = '1d' and adj_mode = 'none')),
+    kline_count = coalesce((
       select count(*) from kline_bars b
        where b.symbol = kline_mapping.app_symbol
          and b.period = '1d' and b.adj_mode = 'none'
-    );
+    ), 0);
 
 insert into kline_sync_runs (id, stock_code, mode, status, started_at, finished_at, rows_written, source)
 values ('ksr-init-' || strftime(current_timestamp, '%Y%m%d%H%M%S'), 'ALL', 'refresh', 'ok',

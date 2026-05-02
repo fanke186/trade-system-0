@@ -8,69 +8,87 @@ pub fn list_securities(
     keyword: Option<String>,
     limit: Option<i64>,
 ) -> AppResult<Vec<Security>> {
-    let keyword = keyword.unwrap_or_default();
-    let limit = limit.unwrap_or(50).clamp(1, 200);
+    let keyword = keyword.unwrap_or_default().trim().to_lowercase();
+    let limit = limit.unwrap_or(50).clamp(1, 10000);
     let like = format!("%{}%", keyword);
-    let mut stmt = conn.prepare(
-        r#"
-        with latest as (
-          select symbol, max(trade_date) as latest_date
-            from kline_bars
-           where period = '1d' and adj_mode = 'none'
-           group by symbol
-        ),
-        global_latest as (
-          select max(m.last_kline_date) as date
-            from kline_mapping m
-            join securities s on s.symbol = m.app_symbol
-           where coalesce(s.stock_type, 'stock') = 'stock'
-             and s.status = 'active'
-        ),
-        latest_bar as (
-          select b.symbol, b.close, b.change_pct, cast(b.trade_date as varchar) as trade_date
-            from kline_bars b
-            join latest l on l.symbol = b.symbol and l.latest_date = b.trade_date
-           where b.period = '1d' and b.adj_mode = 'none'
-        )
+
+    let (sql, has_filter) = if keyword.is_empty() {
+        (r#"
         select s.symbol, s.code, s.name, s.exchange, s.board, s.industry, coalesce(s.stock_type, 'stock'),
-               cast(s.list_date as varchar), s.status, lb.close, lb.change_pct, lb.trade_date,
+               cast(s.list_date as varchar), s.status, s.latest_price, s.change_pct, s.latest_date,
                case
-                 when lb.trade_date is null then 'missing'
-                 when km.last_kline_date = (select date from global_latest) then 'complete'
+                 when km.last_kline_date is null then 'missing'
+                 when km.last_kline_date = (select max(last_kline_date) from kline_mapping) then 'complete'
                  else 'stale'
                end as data_status
           from securities s
-          left join latest_bar lb on lb.symbol = s.symbol
           left join kline_mapping km on km.app_symbol = s.symbol
-         where lower(s.code) like lower(?1)
-            or lower(s.name) like lower(?1)
-            or lower(s.symbol) like lower(?1)
+         where s.status = 'active'
+         order by s.code, s.exchange
+         limit ?1
+        "#.to_string(), false)
+    } else {
+        (r#"
+        select s.symbol, s.code, s.name, s.exchange, s.board, s.industry, coalesce(s.stock_type, 'stock'),
+               cast(s.list_date as varchar), s.status, s.latest_price, s.change_pct, s.latest_date,
+               case
+                 when km.last_kline_date is null then 'missing'
+                 when km.last_kline_date = (select max(last_kline_date) from kline_mapping) then 'complete'
+                 else 'stale'
+               end as data_status
+          from securities s
+          left join kline_mapping km on km.app_symbol = s.symbol
+         where s.status = 'active'
+           and (lower(s.code) like ?1 or lower(s.name) like ?1 or lower(s.symbol) like ?1)
          order by s.code, s.exchange
          limit ?2
-        "#,
-    )?;
-    let rows = stmt.query_map(duckdb::params![like, limit], |row| {
-        Ok(Security {
-            symbol: row.get(0)?,
-            code: row.get(1)?,
-            name: row.get(2)?,
-            exchange: row.get(3)?,
-            board: row.get(4)?,
-            industry: row.get(5)?,
-            stock_type: row.get(6)?,
-            list_date: row.get(7)?,
-            status: row.get(8)?,
-            latest_price: row.get(9)?,
-            change_pct: row.get(10)?,
-            latest_date: row.get(11)?,
-            data_status: row.get(12)?,
-        })
-    })?;
-    let mut values = Vec::new();
-    for row in rows {
-        values.push(row?);
-    }
-    Ok(values)
+        "#.to_string(), true)
+    };
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows: Vec<Security> = if has_filter {
+        stmt.query_map(duckdb::params![like, limit], |row| {
+            Ok(Security {
+                symbol: row.get(0)?,
+                code: row.get(1)?,
+                name: row.get(2)?,
+                exchange: row.get(3)?,
+                board: row.get(4)?,
+                industry: row.get(5)?,
+                stock_type: row.get(6)?,
+                list_date: row.get(7)?,
+                status: row.get(8)?,
+                latest_price: row.get(9)?,
+                change_pct: row.get(10)?,
+                latest_date: row.get(11)?,
+                data_status: row.get(12)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect()
+    } else {
+        stmt.query_map(duckdb::params![limit], |row| {
+            Ok(Security {
+                symbol: row.get(0)?,
+                code: row.get(1)?,
+                name: row.get(2)?,
+                exchange: row.get(3)?,
+                board: row.get(4)?,
+                industry: row.get(5)?,
+                stock_type: row.get(6)?,
+                list_date: row.get(7)?,
+                status: row.get(8)?,
+                latest_price: row.get(9)?,
+                change_pct: row.get(10)?,
+                latest_date: row.get(11)?,
+                data_status: row.get(12)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect()
+    };
+
+    Ok(rows)
 }
 
 pub fn get_bars(

@@ -83,20 +83,34 @@ fn refresh_inner(
 
     let (_daily_new, is_first_sync) = sync_daily_bars_incremental(conn)?;
     sync_trade_calendar(conn)?;
-    emit_progress(app, "syncing", 65, "已同步日 K 并计算衍生字段");
+    emit_progress(app, "syncing", 65, "已同步日 K");
+
+    // Capture changed symbols BEFORE compute_derived_fields fills pre_close
+    let changed_symbols = changed_symbols_since(conn)?;
 
     compute_derived_fields(conn, is_first_sync)?;
     emit_progress(app, "syncing", 75, "已计算衍生字段");
 
-    let changed_symbols = changed_symbols_since(conn)?;
-    aggregate_period_incremental(conn, "1w", "week", &changed_symbols)?;
-    aggregate_period_incremental(conn, "1M", "month", &changed_symbols)?;
-    aggregate_period_incremental(conn, "1Q", "quarter", &changed_symbols)?;
-    aggregate_period_incremental(conn, "1Y", "year", &changed_symbols)?;
-    emit_progress(app, "syncing", 90, "已增量聚合周月季年 K");
+    if changed_symbols.is_empty() {
+        tracing::info!("没有需要重新聚合的标的，跳过聚合步骤");
+        emit_progress(app, "syncing", 90, "聚合无变化，跳过");
 
-    update_mapping_watermarks(conn)?;
-    emit_progress(app, "syncing", 98, "已更新同步水位");
+        // No changes to any data — skip expensive watermarks + securities updates
+        emit_progress(app, "syncing", 100, "数据已是最新，无需更新");
+    } else {
+        tracing::info!(symbol_count = changed_symbols.len(), "开始增量聚合");
+        aggregate_period_incremental(conn, "1w", "week", &changed_symbols)?;
+        aggregate_period_incremental(conn, "1M", "month", &changed_symbols)?;
+        aggregate_period_incremental(conn, "1Q", "quarter", &changed_symbols)?;
+        aggregate_period_incremental(conn, "1Y", "year", &changed_symbols)?;
+        emit_progress(app, "syncing", 90, "已增量聚合周月季年 K");
+
+        update_mapping_watermarks(conn)?;
+        emit_progress(app, "syncing", 96, "已更新同步水位");
+
+        refresh_securities_latest(conn)?;
+        emit_progress(app, "syncing", 98, "已刷新标的最新价");
+    }
 
     let rows_written = count_kline_rows(conn)?;
     emit_progress(app, "completed", 100, "同步完成");
@@ -343,25 +357,28 @@ fn sync_daily_bars_incremental(conn: &DuckConnection) -> AppResult<(i64, bool)> 
     Ok((rows as i64, !has_watermarks))
 }
 
-/// Compute derived fields (pre_close, change, change_pct, amplitude) only for rows
-/// that haven't been computed yet (pre_close is null). On first sync this processes
-/// everything; on incremental sync only the new rows.
+/// Compute derived fields only for rows with null pre_close.
+/// Scopes the window function to affected symbols only, avoiding a full 32M-row scan.
 fn compute_derived_fields(conn: &DuckConnection, _is_first_sync: bool) -> AppResult<()> {
-    // The CTE uses a window function over ALL rows for each symbol to compute
-    // pre_close correctly — the new row's pre_close might need the previous row
-    // which could be an existing row. So we only need lag() to compute the
-    // pre_close for rows that are currently null.
     conn.execute(
         r#"
-        with computed as (
-          select
-            symbol, period, adj_mode, trade_date,
-            lag(close) over (
-              partition by symbol, period, adj_mode
-              order by trade_date
-            ) as calc_pre_close
+        with affected as (
+          select distinct symbol, period, adj_mode
           from kline_bars
-          where source = 'market-sync'
+          where source = 'market-sync' and pre_close is null
+        ),
+        computed as (
+          select
+            b.symbol, b.period, b.adj_mode, b.trade_date,
+            lag(b.close) over (
+              partition by b.symbol, b.period, b.adj_mode
+              order by b.trade_date
+            ) as calc_pre_close
+          from kline_bars b
+          join affected a on b.symbol = a.symbol
+            and b.period = a.period
+            and b.adj_mode = a.adj_mode
+          where b.source = 'market-sync'
         )
         update kline_bars
         set
@@ -406,10 +423,14 @@ fn changed_symbols_since(conn: &DuckConnection) -> AppResult<Vec<String>> {
 }
 
 fn sync_trade_calendar(conn: &DuckConnection) -> AppResult<()> {
-    conn.execute("delete from trade_calendar", [])?;
     conn.execute(
         "insert or ignore into trade_calendar (trade_date, is_open)
-         select distinct trade_date, true from kline_bars where period = '1d'",
+         select distinct trade_date, true
+           from kline_bars
+          where period = '1d'
+            and trade_date > coalesce(
+                  (select max(trade_date) from trade_calendar), '1970-01-01'
+                )",
         [],
     )?;
     Ok(())
@@ -520,22 +541,64 @@ fn aggregate_period_incremental(
 fn update_mapping_watermarks(conn: &DuckConnection) -> AppResult<()> {
     conn.execute(
         r#"
+        with symbol_stats as (
+          select symbol, max(trade_date) as max_date, count(*) as cnt
+            from kline_bars
+           where period = '1d' and adj_mode = 'none'
+           group by symbol
+        ),
+        global_max as (
+          select max(trade_date) as date
+            from kline_bars
+           where period = '1d' and adj_mode = 'none'
+        )
         update kline_mapping
-           set last_sync_at = current_timestamp,
-               last_kline_date = (
-                 select max(trade_date)
-                   from kline_bars b
-                  where b.symbol = kline_mapping.app_symbol
-                    and b.period = '1d'
-                    and b.adj_mode = 'none'
-               ),
-               kline_count = (
-                 select count(*)
-                   from kline_bars b
-                  where b.symbol = kline_mapping.app_symbol
-                    and b.period = '1d'
-                    and b.adj_mode = 'none'
-               )
+           set last_sync_at   = current_timestamp,
+               last_kline_date = coalesce(s.max_date, g.date),
+               kline_count     = coalesce(s.cnt, 0)
+          from symbol_stats s, global_max g
+         where kline_mapping.app_symbol = s.symbol
+        "#,
+        [],
+    )?;
+
+    // Fill watermarks for symbols without kline data (e.g. newly listed, no trades yet)
+    conn.execute(
+        r#"
+        update kline_mapping
+           set last_sync_at   = current_timestamp,
+               last_kline_date = (select max(trade_date) from kline_bars where period = '1d' and adj_mode = 'none'),
+               kline_count     = 0
+         where last_kline_date is null
+        "#,
+        [],
+    )?;
+
+    Ok(())
+}
+
+/// Write latest price / change_pct / trade_date from kline_bars into securities
+/// so list queries don't need to JOIN the 32M-row kline_bars table.
+fn refresh_securities_latest(conn: &DuckConnection) -> AppResult<()> {
+    conn.execute(
+        r#"
+        update securities
+        set
+          latest_price  = lb.close,
+          change_pct    = lb.change_pct,
+          latest_date   = cast(lb.trade_date as varchar)
+        from (
+          select symbol, close, change_pct, trade_date
+          from kline_bars
+          where period = '1d' and adj_mode = 'none'
+            and (symbol, trade_date) in (
+              select symbol, max(trade_date)
+              from kline_bars
+              where period = '1d' and adj_mode = 'none'
+              group by symbol
+            )
+        ) lb
+        where securities.symbol = lb.symbol
         "#,
         [],
     )?;
