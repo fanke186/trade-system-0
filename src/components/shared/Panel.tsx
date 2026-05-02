@@ -5,12 +5,14 @@ export function Panel({
   title,
   action,
   children,
-  className
+  className,
+  bodyClassName
 }: {
   title?: string
   action?: ReactNode
   children: ReactNode
   className?: string
+  bodyClassName?: string
 }) {
   return (
     <section className={cn('border border-border bg-panel', className)}>
@@ -24,7 +26,7 @@ export function Panel({
           {action}
         </div>
       ) : null}
-      <div className="p-4">{children}</div>
+      <div className={cn('p-4', bodyClassName)}>{children}</div>
     </section>
   )
 }

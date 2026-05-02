@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, RefreshCw, Search } from 'lucide-react'
+import { ChevronRight, RefreshCw, RotateCcw, Search } from 'lucide-react'
 import { listen } from '@tauri-apps/api/event'
 import { cn } from '../lib/cn'
 import { Panel } from '../components/shared/Panel'
@@ -10,7 +10,7 @@ import { Field, Input } from '../components/shared/Field'
 import { DataTable, Td } from '../components/shared/DataTable'
 import { commands } from '../lib/commands'
 import { formatNumber, toErrorMessage } from '../lib/format'
-import type { Security, SecuritySearchResult, TradeSystemSummary, Watchlist } from '../lib/types'
+import type { Security, TradeSystemSummary, Watchlist } from '../lib/types'
 
 function DataHealthBanner() {
   const queryClient = useQueryClient()
@@ -100,40 +100,49 @@ function DataHealthBanner() {
 function SecuritySearchBox({
   keyword,
   onKeywordChange,
+  onSearch,
+  onReset,
   onSelect
 }: {
   keyword: string
   onKeywordChange: (keyword: string) => void
+  onSearch: () => void
+  onReset: () => void
   onSelect: (code: string) => void
 }) {
-  const [results, setResults] = useState<SecuritySearchResult[]>([])
   const [open, setOpen] = useState(false)
+  const securitiesQuery = useQuery({
+    queryKey: ['securities'],
+    queryFn: () => commands.listSecurities('', 10000),
+    staleTime: 60_000
+  })
+  const results = useMemo(() => {
+    const value = keyword.trim().toLowerCase()
+    if (!value) return []
+    return (securitiesQuery.data ?? [])
+      .filter(security =>
+        [
+          security.code,
+          security.name,
+          security.symbol,
+          security.exchange,
+          security.stockType,
+          security.industry,
+          security.board,
+        ].filter(Boolean).join(' ').toLowerCase().includes(value)
+      )
+      .slice(0, 15)
+  }, [keyword, securitiesQuery.data])
 
-  const handleSelect = (result: SecuritySearchResult) => {
+  const handleSelect = (result: Security) => {
     onKeywordChange(result.code)
     setOpen(false)
     onSelect(result.symbol)
   }
 
   useEffect(() => {
-    const value = keyword.trim()
-    if (value.length < 1) {
-      setResults([])
-      setOpen(false)
-      return
-    }
-    const t = setTimeout(async () => {
-      try {
-        const next = await commands.searchSecurities(value, 15)
-        setResults(next)
-        setOpen(next.length > 0)
-      } catch {
-        setResults([])
-        setOpen(false)
-      }
-    }, 150)
-    return () => clearTimeout(t)
-  }, [keyword])
+    setOpen(keyword.trim().length > 0 && results.length > 0)
+  }, [keyword, results.length])
 
   return (
     <div className="relative mb-4 max-w-xl">
@@ -145,22 +154,26 @@ function SecuritySearchBox({
               className="pl-9"
               value={keyword}
               onChange={event => onKeywordChange(event.target.value)}
-              onFocus={() => setOpen(results.length > 0)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') onSearch()
+              }}
+              onFocus={() => setOpen(keyword.trim().length > 0 && results.length > 0)}
               placeholder={'输入代码或名称'}
             />
           </div>
           <Button
             icon={<Search className="h-4 w-4" />}
             variant="primary"
-            onClick={() => {
-              if (results[0]) {
-                handleSelect(results[0])
-              } else if (keyword.trim()) {
-                onSelect(keyword.trim())
-              }
-            }}
+            onClick={onSearch}
           >
             {'检索'}
+          </Button>
+          <Button
+            icon={<RotateCcw className="h-4 w-4" />}
+            onClick={onReset}
+            variant="secondary"
+          >
+            {'重置'}
           </Button>
         </div>
       </Field>
@@ -174,7 +187,7 @@ function SecuritySearchBox({
             >
               <span className="w-20 text-foreground">{result.code}</span>
               <span className="flex-1 font-sans">{result.name}</span>
-              <span className="text-muted-foreground text-[10px]">{result.marketType ?? result.stockType}</span>
+              <span className="text-muted-foreground text-[10px]">{result.exchange} · {result.stockType}</span>
             </button>
           ))}
         </div>
@@ -195,12 +208,17 @@ type SortField =
   | 'dataStatus'
 type SortDir = 'asc' | 'desc'
 type ContextMenuState = { x: number; y: number; symbols: string[] } | null
+type DataStatusFilter = 'all' | 'complete' | 'stale' | 'missing'
+const KLINE_DATA_PAGE_SIZE = 12
+const zhCollator = new Intl.Collator('zh-CN')
 
 function SecuritiesTable({
   keyword,
+  resetToken,
   onSelect
 }: {
   keyword: string
+  resetToken: number
   onSelect: (code: string) => void
 }) {
   const queryClient = useQueryClient()
@@ -209,7 +227,7 @@ function SecuritiesTable({
   const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(() => new Set())
   const [menu, setMenu] = useState<ContextMenuState>(null)
   const [page, setPage] = useState(0)
-  const PAGE_SIZE = 15
+  const [dataStatusFilter, setDataStatusFilter] = useState<DataStatusFilter>('all')
 
   // Load all securities once into memory, filter/sort client-side
   const allSecQuery = useQuery({
@@ -254,32 +272,55 @@ function SecuritiesTable({
     }
   }, [])
 
+  useEffect(() => {
+    setSortField('code')
+    setSortDir('asc')
+    setDataStatusFilter('all')
+    setSelectedSymbols(new Set())
+    setPage(0)
+  }, [resetToken])
+
+  const indexedSecurities = useMemo(
+    () =>
+      (allSecQuery.data ?? []).map(security => ({
+        security,
+        searchText: [
+          security.code,
+          security.name,
+          security.symbol,
+          security.exchange,
+          security.stockType,
+          security.industry,
+          security.board,
+        ].filter(Boolean).join(' ').toLowerCase()
+      })),
+    [allSecQuery.data]
+  )
+
   const sorted = useMemo(() => {
-    const data = allSecQuery.data ?? []
-    // Client-side filter by keyword
-    const filtered = keyword.trim()
-      ? data.filter(s =>
-          s.code.toLowerCase().includes(keyword.toLowerCase()) ||
-          s.name.toLowerCase().includes(keyword.toLowerCase()) ||
-          s.symbol.toLowerCase().includes(keyword.toLowerCase())
-        )
-      : data
+    const normalizedKeyword = keyword.trim().toLowerCase()
+    const filtered = indexedSecurities
+      .filter(({ security, searchText }) =>
+        (dataStatusFilter === 'all' || security.dataStatus === dataStatusFilter) &&
+        (!normalizedKeyword || searchText.includes(normalizedKeyword))
+      )
+      .map(item => item.security)
     return [...filtered].sort((a, b) => {
       const aVal = valueForSort(a, sortField)
       const bVal = valueForSort(b, sortField)
       const cmp =
         typeof aVal === 'number' || typeof bVal === 'number'
           ? Number(aVal ?? Number.NEGATIVE_INFINITY) - Number(bVal ?? Number.NEGATIVE_INFINITY)
-          : String(aVal ?? '').localeCompare(String(bVal ?? ''), 'zh-CN')
+          : zhCollator.compare(String(aVal ?? ''), String(bVal ?? ''))
       return sortDir === 'asc' ? cmp : -cmp
     })
-  }, [allSecQuery.data, keyword, sortField, sortDir])
+  }, [dataStatusFilter, indexedSecurities, keyword, sortField, sortDir])
 
-  const totalPages = Math.ceil(sorted.length / PAGE_SIZE)
-  const paged = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+  const totalPages = Math.ceil(sorted.length / KLINE_DATA_PAGE_SIZE)
+  const paged = sorted.slice(page * KLINE_DATA_PAGE_SIZE, (page + 1) * KLINE_DATA_PAGE_SIZE)
 
   // Reset page when filter/sort changes
-  useEffect(() => { setPage(0) }, [keyword, sortField, sortDir])
+  useEffect(() => { setPage(0) }, [keyword, sortField, sortDir, dataStatusFilter])
 
   const visibleSymbols = paged.map(security => security.symbol)
   const allSelected = visibleSymbols.length > 0 && visibleSymbols.every(symbol => selectedSymbols.has(symbol))
@@ -346,7 +387,23 @@ function SecuritiesTable({
     { key: 'latestPrice', label: '现价', onClick: () => handleSort('latestPrice'), active: sortField === 'latestPrice', dir: sortDir },
     { key: 'latestDate', label: '最新日期', onClick: () => handleSort('latestDate'), active: sortField === 'latestDate', dir: sortDir },
     { key: 'industry', label: '所属行业', onClick: () => handleSort('industry'), active: sortField === 'industry', dir: sortDir },
-    { key: 'dataStatus', label: '数据状态', onClick: () => handleSort('dataStatus'), active: sortField === 'dataStatus', dir: sortDir }
+    {
+      key: 'dataStatus',
+      label: (
+        <select
+          aria-label="筛选数据状态"
+          className="h-6 bg-muted/55 px-1.5 text-[11px] text-foreground outline-none"
+          value={dataStatusFilter}
+          onClick={event => event.stopPropagation()}
+          onChange={event => setDataStatusFilter(event.target.value as DataStatusFilter)}
+        >
+          <option value="all">数据状态</option>
+          <option value="complete">齐全</option>
+          <option value="stale">待更新</option>
+          <option value="missing">缺失</option>
+        </select>
+      )
+    }
   ]
 
   return (
@@ -529,18 +586,28 @@ export function KlineDataPage({
   stockCode: string
   onStockCodeChange: (code: string) => void
 }) {
+  const [keywordDraft, setKeywordDraft] = useState('')
   const [keyword, setKeyword] = useState('')
+  const [resetToken, setResetToken] = useState(0)
 
   return (
-    <div className="grid gap-4">
+    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-4 overflow-hidden">
       <DataHealthBanner />
-      <Panel title={'证券检索'}>
+      <Panel title={'证券检索'} className="min-h-0 overflow-hidden" bodyClassName="flex min-h-0 flex-col overflow-hidden">
         <SecuritySearchBox
-          keyword={keyword}
-          onKeywordChange={setKeyword}
+          keyword={keywordDraft}
+          onKeywordChange={setKeywordDraft}
+          onSearch={() => setKeyword(keywordDraft)}
+          onReset={() => {
+            setKeywordDraft('')
+            setKeyword('')
+            setResetToken(token => token + 1)
+          }}
           onSelect={onStockCodeChange}
         />
-        <SecuritiesTable keyword={keyword} onSelect={onStockCodeChange} />
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <SecuritiesTable keyword={keyword} resetToken={resetToken} onSelect={onStockCodeChange} />
+        </div>
       </Panel>
     </div>
   )

@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Check, Send, X } from 'lucide-react'
+import { Bot, Check, Loader2, Send, Sparkles, User, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '../shared/Button'
-import { Field, Input, Textarea } from '../shared/Field'
+import { Field, Input } from '../shared/Field'
 import { Badge } from '../shared/Badge'
 import { commands } from '../../lib/commands'
 import { sendChatMessage } from '../../lib/agentChat'
@@ -115,14 +115,22 @@ export function AgentEditWindow({
       })
     },
     onSuccess: draft => {
-      const messageIndex = messages.length + 1
       const questions = draft.gapQuestions.length > 0 ? `\n\n待确认：\n${draft.gapQuestions.map(item => `- ${item}`).join('\n')}` : ''
       const diff = draft.diff ? `\n\n变更：${draft.diff}` : ''
+      setMessages(previous => {
+        const next = [
+          ...previous,
+          { role: 'assistant' as const, content: `${draft.assistantMessage}${diff}${questions}` }
+        ]
+        setAssistantDraft({ messageIndex: next.length - 1, markdown: draft.markdown })
+        return next
+      })
+    },
+    onError: error => {
       setMessages(previous => [
         ...previous,
-        { role: 'assistant', content: `${draft.assistantMessage}${diff}${questions}` }
+        { role: 'assistant', content: `调用失败：${toErrorMessage(error)}` }
       ])
-      setAssistantDraft({ messageIndex, markdown: draft.markdown })
     }
   })
 
@@ -131,18 +139,23 @@ export function AgentEditWindow({
   if (!open || !target) return null
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 p-6">
-      <div className="mx-auto flex h-full max-w-7xl flex-col border border-border bg-panel shadow-[0_0_60px_rgba(0,0,0,0.45)]">
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <div className="truncate font-mono text-sm font-semibold">
-                {isCreate ? '新建交易系统 Agent' : '编辑交易系统 Agent'}
-              </div>
-              <Badge tone={status?.canScore ? 'success' : 'warning'}>{status?.status ?? 'draft'}</Badge>
+    <div className="fixed inset-0 z-50 bg-black/70 p-5">
+      <div className="mx-auto grid h-full max-w-[1540px] grid-rows-[64px_minmax(0,1fr)] overflow-hidden border border-border bg-panel shadow-[0_0_70px_rgba(0,0,0,0.55)]">
+        <div className="flex shrink-0 items-center justify-between border-b border-border bg-background/40 px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center bg-ring text-panel">
+              <Sparkles className="h-4 w-4" />
             </div>
-            <div className="mt-1 truncate text-xs text-muted-foreground">
-              {isCreate ? '初始版本 V1' : `当前版本 V${target.mode === 'edit' ? target.system.activeVersion ?? 1 : 1}`}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <div className="truncate font-mono text-base font-semibold">
+                  {isCreate ? '新建交易系统 Agent' : '编辑交易系统 Agent'}
+                </div>
+                <Badge tone={status?.canScore ? 'success' : 'warning'}>{status?.status ?? 'draft'}</Badge>
+              </div>
+              <div className="mt-1 truncate text-xs text-muted-foreground">
+                {isCreate ? '初始版本 V1' : `当前版本 V${target.mode === 'edit' ? target.system.activeVersion ?? 1 : 1}`}
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -153,15 +166,24 @@ export function AgentEditWindow({
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(360px,42%)_1fr]">
-          <section className="min-h-0 overflow-auto border-r border-border bg-background p-5">
-            <div className="trade-agent-markdown">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown || ' '}</ReactMarkdown>
+        <div className="grid min-h-0 grid-cols-[minmax(420px,48%)_minmax(420px,1fr)]">
+          <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] border-r border-border bg-background">
+            <div className="flex items-center justify-between border-b border-border px-5 py-3">
+              <div>
+                <div className="font-mono text-sm font-semibold">Markdown 预览</div>
+                <div className="mt-1 text-xs text-muted-foreground">{name || '未命名交易系统'}</div>
+              </div>
+              {assistantDraft ? <Badge tone="info">有待确认修订</Badge> : null}
+            </div>
+            <div className="min-h-0 overflow-auto p-6">
+              <div className="trade-agent-markdown max-w-3xl">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown || ' '}</ReactMarkdown>
+              </div>
             </div>
           </section>
 
-          <section className="grid min-h-0 grid-rows-[auto_minmax(160px,1fr)_minmax(220px,34%)_auto]">
-            <div className="grid grid-cols-[220px_1fr] gap-3 border-b border-border p-4">
+          <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-panel">
+            <div className="grid grid-cols-[240px_1fr] gap-4 border-b border-border p-4">
               <Field label="名称">
                 <Input disabled={!isCreate} value={name} onChange={event => setName(event.target.value)} />
               </Field>
@@ -170,21 +192,25 @@ export function AgentEditWindow({
               </Field>
             </div>
 
-            <div className="min-h-0 overflow-auto border-b border-border p-4">
-              <div className="grid gap-3">
+            <div className="min-h-0 overflow-auto p-5">
+              <div className="mx-auto grid max-w-3xl gap-3">
                 {messages.map((message, index) => (
-                  <div
-                    className={
-                      message.role === 'assistant'
-                        ? 'border border-ring/30 bg-ring/10 p-3'
-                        : 'ml-10 border border-border bg-background/70 p-3'
-                    }
-                    key={`${message.role}-${index}`}
-                  >
-                    <div className="mb-1 font-mono text-[11px] uppercase text-muted-foreground">{message.role}</div>
-                    <div className="whitespace-pre-wrap text-sm leading-6">{message.content}</div>
+                  <div className={message.role === 'assistant' ? 'mr-10' : 'ml-14'} key={`${message.role}-${index}`}>
+                    <div
+                      className={
+                        message.role === 'assistant'
+                          ? 'border border-ring/25 bg-ring/10 p-4'
+                          : 'border border-border bg-background/70 p-4'
+                      }
+                    >
+                      <div className="mb-2 flex items-center gap-2 font-mono text-[11px] uppercase text-muted-foreground">
+                        {message.role === 'assistant' ? <Bot className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+                        {message.role === 'assistant' ? 'Agent' : 'You'}
+                      </div>
+                      <div className="whitespace-pre-wrap text-sm leading-6">{message.content}</div>
+                    </div>
                     {assistantDraft?.messageIndex === index ? (
-                      <div className="mt-3 flex gap-2">
+                      <div className="mt-2 flex gap-2">
                         <Button
                           onClick={() => {
                             setMarkdown(assistantDraft.markdown)
@@ -203,28 +229,27 @@ export function AgentEditWindow({
                   </div>
                 ))}
                 {chatMutation.isPending ? (
-                  <div className="border border-border bg-background/70 p-3 text-sm text-muted-foreground">
-                    Agent 正在生成修改建议...
+                  <div className="mr-10 border border-ring/25 bg-ring/10 p-4 text-sm text-muted-foreground">
+                    <div className="mb-2 flex items-center gap-2 font-mono text-[11px] uppercase">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Agent
+                    </div>
+                    <div className="grid gap-1.5">
+                      <div>正在连接当前 Provider...</div>
+                      <div>正在分析交易系统缺口并生成修订建议...</div>
+                    </div>
                   </div>
                 ) : null}
               </div>
             </div>
 
-            <div className="min-h-0 border-b border-border p-4">
-              <Textarea
-                className="h-full min-h-0 font-mono text-xs leading-5"
-                value={markdown}
-                onChange={event => setMarkdown(event.target.value)}
-              />
-            </div>
-
-            <div className="grid grid-cols-[1fr_auto] gap-3 p-4">
+            <div className="grid grid-cols-[1fr_auto] gap-3 border-t border-border bg-background/35 p-4">
               <Input
                 placeholder="输入你希望交易系统如何演进..."
                 value={userMessage}
                 onChange={event => setUserMessage(event.target.value)}
                 onKeyDown={event => {
-                  if (event.key === 'Enter') chatMutation.mutate()
+                  if (event.key === 'Enter' && !event.nativeEvent.isComposing) chatMutation.mutate()
                 }}
               />
               <Button
@@ -238,11 +263,6 @@ export function AgentEditWindow({
           </section>
         </div>
 
-        {publishMutation.isError || chatMutation.isError ? (
-          <div className="border-t border-border px-4 py-2 text-xs text-danger">
-            {toErrorMessage(publishMutation.error || chatMutation.error)}
-          </div>
-        ) : null}
       </div>
     </div>
   )

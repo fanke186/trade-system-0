@@ -68,6 +68,17 @@ export function CrosshairTooltip({
         <span className="text-right text-foreground">
           {bar.turnover ? `${bar.turnover.toFixed(2)}%` : '-'}
         </span>
+
+        {bar.ma
+          ? Object.entries(bar.ma).map(([name, value]) => (
+              <span key={name} className="contents">
+                <span className="text-muted-foreground">{name}</span>
+                <span className="text-right text-foreground">
+                  {value != null ? value.toFixed(2) : '-'}
+                </span>
+              </span>
+            ))
+          : null}
       </div>
     </div>
   )

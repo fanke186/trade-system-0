@@ -88,14 +88,15 @@ export function TradeSystemAgentsPage({
   const selectedStock = stocks.find(stock => stock.symbol === selectedSymbol)
 
   const handleCreate = () => {
-    const name = window.prompt('交易系统 Agent 名称')
-    const normalized = name?.trim()
-    if (!normalized) return
-    if (systems.some(system => system.name === normalized)) {
-      window.alert('已存在同名交易系统 Agent')
-      return
+    const baseName = '新交易系统 Agent'
+    const existingNames = new Set(systems.map(system => system.name))
+    let name = baseName
+    let index = 2
+    while (existingNames.has(name)) {
+      name = `${baseName} ${index}`
+      index += 1
     }
-    setEditorTarget({ mode: 'create', name: normalized })
+    setEditorTarget({ mode: 'create', name })
   }
 
   const handlePublished = (version: TradeSystemVersion) => {

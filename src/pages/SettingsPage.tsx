@@ -34,7 +34,6 @@ const providerPresets: Array<{
       providerType: 'deepseek',
       baseUrl: 'https://api.deepseek.com',
       apiKey: '',
-      apiKeyRef: 'env:DEEPSEEK_API_KEY',
       model: 'deepseek-v4-pro',
       temperature: 0.2,
       maxTokens: 8192,
@@ -53,7 +52,6 @@ const providerPresets: Array<{
       providerType: 'deepseek',
       baseUrl: 'https://api.deepseek.com',
       apiKey: '',
-      apiKeyRef: 'env:DEEPSEEK_API_KEY',
       model: 'deepseek-v4-flash',
       temperature: 0.2,
       maxTokens: 8192,
@@ -72,7 +70,6 @@ const providerPresets: Array<{
       providerType: 'openai_compatible',
       baseUrl: 'https://api.openai.com/v1',
       apiKey: '',
-      apiKeyRef: 'env:OPENAI_API_KEY',
       model: 'gpt-4.1-mini',
       temperature: 0.2,
       maxTokens: 4096,
@@ -117,7 +114,7 @@ export function SettingsPage() {
       providerType: selectedProvider.providerType,
       baseUrl: selectedProvider.baseUrl,
       apiKey: '',
-      apiKeyRef: selectedProvider.apiKeyRef,
+      apiKeyRef: selectedProvider.apiKeyRef.startsWith('env:') ? '' : selectedProvider.apiKeyRef,
       model: selectedProvider.model,
       temperature: selectedProvider.temperature,
       maxTokens: selectedProvider.maxTokens,
@@ -159,7 +156,7 @@ export function SettingsPage() {
         id: form.id,
         name: form.name || providerPresets[0].input.name,
         apiKey: form.apiKey,
-        apiKeyRef: form.apiKeyRef || providerPresets[0].input.apiKeyRef
+        apiKeyRef: form.apiKeyRef
       })
       return
     }
@@ -276,19 +273,13 @@ export function SettingsPage() {
               <Field label="Base URL">
                 <Input value={form.baseUrl} onChange={event => setForm({ ...form, baseUrl: event.target.value })} />
               </Field>
-              <div className="grid grid-cols-[1fr_260px] gap-4">
+              <div className="grid gap-4">
                 <Field label="API Key">
                   <Input
                     type="password"
                     value={form.apiKey ?? ''}
-                    placeholder={form.apiKeyRef?.startsWith('local:') ? '已保存到本地 secrets' : '留空则使用 API Key 引用'}
+                    placeholder={form.apiKeyRef?.startsWith('local:') ? '已保存到本地 secrets；重新输入可替换' : '输入后保存到本地 secrets'}
                     onChange={event => setForm({ ...form, apiKey: event.target.value })}
-                  />
-                </Field>
-                <Field label="API Key 引用">
-                  <Input
-                    value={form.apiKeyRef ?? ''}
-                    onChange={event => setForm({ ...form, apiKeyRef: event.target.value })}
                   />
                 </Field>
               </div>
@@ -377,7 +368,7 @@ export function SettingsPage() {
             </div>
             <div className="grid gap-2 text-xs leading-5 text-muted-foreground">
               <div>当前选中：{selectedProvider?.name ?? '新连接'}</div>
-              <div>Key 来源：{form.apiKey ? '本地 secrets' : form.apiKeyRef || '-'}</div>
+              <div>Key 来源：{form.apiKey || form.apiKeyRef?.startsWith('local:') ? '本地 secrets' : '未保存'}</div>
               {testMutation.data ? (
                 <div className={testMutation.data.ok ? 'text-success' : 'text-danger'}>
                   测试结果：{testMutation.data.ok ? 'ok' : 'failed'} / {testMutation.data.latencyMs ?? '-'}ms /{' '}

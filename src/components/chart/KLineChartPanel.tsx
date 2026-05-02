@@ -4,9 +4,11 @@ import {
   ActionType, IndicatorSeries, YAxisType, OverlayMode, LineType
 } from 'klinecharts'
 import { CandleType, type Chart, type Crosshair } from 'klinecharts'
+import { BarChart3 } from 'lucide-react'
 import type { ChartAnnotation, ChartAnnotationPayload, KlineBar } from '../../lib/types'
 import { EmptyState } from '../shared/Panel'
 import { DrawingToolbar } from './DrawingToolbar'
+import { buildKLineChartModel, tradeDateToTimestamp } from './KLineChartModel'
 import { Magnifier } from './Magnifier'
 
 registerLocale('zh-CN', {
@@ -22,6 +24,9 @@ registerLocale('zh-CN', {
 
 const CANDLE_PANE_ID = 'candle_pane'
 const SUB_PANE_ID = 'qsgg_sub_pane'
+const DEFAULT_BAR_SPACE = 7
+const CHART_BACKGROUND_COLOR = '#0d0d0d'
+const MA_INDICATOR_NAME = 'QSGGMA'
 
 export function KLineChartPanel({
   bars,
@@ -58,6 +63,7 @@ export function KLineChartPanel({
   const onCrosshairPositionRef = useRef(onCrosshairPosition)
   const selectedAnnotationRef = useRef<ChartAnnotation | null>(null)
   const undoHistoryRef = useRef<Map<string, ChartAnnotationPayload[]>>(new Map())
+  const dataSignatureRef = useRef('')
 
   onCrosshairBarRef.current = onCrosshairBar
   onCrosshairPositionRef.current = onCrosshairPosition
@@ -72,20 +78,10 @@ export function KLineChartPanel({
   const drawingToolRef = useRef(drawingTool)
   drawingToolRef.current = drawingTool
   const crosshairPositionRef = useRef<'top-left' | 'top-right'>('top-right')
+  const hasChartData = bars.length > 0
 
-  const chartData = useMemo(
-    () =>
-      bars.map(bar => ({
-        timestamp: new Date(`${bar.date}T00:00:00`).getTime(),
-        open: bar.open,
-        high: bar.high,
-        low: bar.low,
-        close: bar.close,
-        volume: bar.volume,
-        turnover: bar.amount
-      })),
-    [bars]
-  )
+  const chartModel = useMemo(() => buildKLineChartModel(bars, maLines), [bars, maLines])
+  const chartData = chartModel.adapterBars
 
   const refreshSubPaneTop = useCallback(() => {
     const chart = chartRef.current
@@ -125,12 +121,31 @@ export function KLineChartPanel({
   )
 
   useEffect(() => {
-    latestBarsRef.current = bars
+    latestBarsRef.current = chartModel.bars
+  }, [chartModel.bars])
+
+  const priceTicks = useMemo(() => {
+    const range = bars.reduce(
+      (next, bar) => ({
+        min: Math.min(next.min, bar.low),
+        max: Math.max(next.max, bar.high)
+      }),
+      { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY }
+    )
+    return createTicks(range.min, range.max, 5)
   }, [bars])
+
+  const subTicks = useMemo(() => {
+    const maxValue = bars.reduce(
+      (max, bar) => Math.max(max, subChartType === 'amount' ? bar.amount : bar.volume),
+      Number.NEGATIVE_INFINITY
+    )
+    return createTicks(0, maxValue, 4)
+  }, [bars, subChartType])
 
   // Chart initialization + crosshair subscription
   useEffect(() => {
-    if (!hostRef.current || bars.length === 0) return
+    if (!hostRef.current || !hasChartData) return
     const chart = init(hostRef.current, {
       locale: 'zh-CN',
       customApi: {
@@ -144,7 +159,7 @@ export function KLineChartPanel({
         candle: {
           type: CandleType.CandleUpStroke,
           bar: {
-            upColor: 'rgba(220,38,38,0)',
+            upColor: CHART_BACKGROUND_COLOR,
             upBorderColor: '#dc2626',
             upWickColor: '#dc2626',
             downColor: '#0f9f6e',
@@ -174,7 +189,8 @@ export function KLineChartPanel({
     chartRef.current = chart
     subPaneIdRef.current = null
 
-    chart.setBarSpace(0.01)
+    chart.setBarSpace(DEFAULT_BAR_SPACE)
+    configureScrollLimits(chart)
 
     let resizeTimer: ReturnType<typeof setTimeout> | null = null
     const resizeObserver =
@@ -184,6 +200,7 @@ export function KLineChartPanel({
             resizeTimer = setTimeout(() => {
               if (chartRef.current) {
                 chartRef.current.resize()
+                configureScrollLimits(chartRef.current)
                 scheduleFrame(refreshSubPaneTop)
               }
             }, 100)
@@ -241,15 +258,37 @@ export function KLineChartPanel({
       if (hostRef.current) dispose(hostRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bars.length, refreshSubPaneTop])
+  }, [hasChartData, refreshSubPaneTop])
 
-  // Apply data and annotations
+  // Apply data without recreating the chart instance. Reinitializing the canvas on every
+  // data-length change can leave the time scale in an extreme zoom state after page switches.
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
-    chart.applyNewData(chartData, undefined, refreshSubPaneTop)
-    chart.setBarSpace(0)
+    chart.applyNewData(chartData, undefined, () => {
+      configureScrollLimits(chart)
+      refreshSubPaneTop()
+    })
+    const nextSignature = chartData.length > 0
+      ? `${chartData.length}:${chartData[0]?.timestamp}:${chartData[chartData.length - 1]?.timestamp}`
+      : ''
+    if (nextSignature !== dataSignatureRef.current) {
+      dataSignatureRef.current = nextSignature
+      chart.setBarSpace(DEFAULT_BAR_SPACE)
+      chart.setOffsetRightDistance?.(0)
+    } else {
+      const barSpace = chart.getBarSpace?.()
+      if (!Number.isFinite(barSpace) || barSpace < 3 || barSpace > 16) {
+        chart.setBarSpace(DEFAULT_BAR_SPACE)
+      }
+    }
     clearOverlaySelection()
+  }, [chartData, clearOverlaySelection, refreshSubPaneTop])
+
+  // Apply annotations independently from data so drawing edits do not force a full data refresh.
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
     chart.removeOverlay?.({ groupId: 'persisted' })
     chart.removeOverlay?.({ groupId: 'drawing' })
     annotations.forEach(annotation => {
@@ -259,7 +298,7 @@ export function KLineChartPanel({
       })
       if (overlay) chart.createOverlay?.(overlay, CANDLE_PANE_ID)
     })
-  }, [annotations, chartData, clearOverlaySelection, refreshSubPaneTop, selectOverlay, updateAnnotationFromOverlay])
+  }, [annotations, selectOverlay, updateAnnotationFromOverlay])
 
   // Drawing tool
   useEffect(() => {
@@ -297,27 +336,19 @@ export function KLineChartPanel({
     if (!chart) return
 
     const enabledMas = (maLines ?? []).filter(ma => ma.enabled)
-    const existing = chart.getIndicatorByPaneId?.('candle_pane', 'MA')
+    const existing = chart.getIndicatorByPaneId?.(CANDLE_PANE_ID, MA_INDICATOR_NAME)
     if (existing) {
-      chart.removeIndicator(CANDLE_PANE_ID, 'MA')
+      chart.removeIndicator(CANDLE_PANE_ID, MA_INDICATOR_NAME)
     }
 
     if (enabledMas.length > 0) {
       chart.createIndicator?.(
-        {
-          name: 'MA',
-          calcParams: enabledMas.map(ma => ma.period),
-          styles: {
-            lines: enabledMas.map(ma => ({
-              color: ma.color, size: 1, style: LineType.Solid, smooth: false, dashedValue: []
-            }))
-          }
-        } as never,
+        createMaIndicator(enabledMas) as never,
         true,
         { id: CANDLE_PANE_ID }
       )
     }
-  }, [maLines, bars.length])
+  }, [maLines, hasChartData])
 
   // Sub-chart indicator
   useEffect(() => {
@@ -341,7 +372,7 @@ export function KLineChartPanel({
     )
     subPaneIdRef.current = paneId ?? SUB_PANE_ID
     scheduleFrame(refreshSubPaneTop)
-  }, [refreshSubPaneTop, subChartType, bars.length])
+  }, [hasChartData, refreshSubPaneTop, subChartType])
 
   // Log coordinate
   useEffect(() => {
@@ -352,7 +383,7 @@ export function KLineChartPanel({
         type: coordType === 'log' ? YAxisType.Log : YAxisType.Normal
       }
     })
-  }, [coordType, bars.length])
+  }, [coordType, hasChartData])
 
   // --- Magnifier: track crosshair velocity ---
   const crosshairTimestampRef = useRef(0)
@@ -361,7 +392,7 @@ export function KLineChartPanel({
       setShowMagnifier(false)
       setMagnifierBar(null)
     }
-  }, [drawingTool, bars.length])
+  }, [drawingTool, hasChartData])
 
   // --- DrawingToolbar callbacks ---
   const handleColorChange = useCallback(
@@ -427,17 +458,6 @@ export function KLineChartPanel({
     )
   }
 
-  const priceTicks = createTicks(
-    Math.min(...bars.map(bar => bar.low)),
-    Math.max(...bars.map(bar => bar.high)),
-    5
-  )
-  const subTicks = createTicks(
-    0,
-    Math.max(...bars.map(bar => (subChartType === 'amount' ? bar.amount : bar.volume))),
-    4
-  )
-
   return (
     <div className="relative w-full h-full">
       <div ref={hostRef} className="kline-chart-host w-full h-full" />
@@ -447,19 +467,15 @@ export function KLineChartPanel({
       <AxisLabels side="right" top={(subPaneTop ?? 0) + 28} bottom={12} values={subTicks} formatter={formatChineseUnit} />
 
       {/* Sub-chart toggle */}
-      <div
-        className="absolute left-2 z-30 flex gap-0.5 bg-background/75 px-1 py-0.5 backdrop-blur-sm"
+      <button
+        type="button"
+        onClick={() => onSubChartTypeChange?.(subChartType === 'amount' ? 'volume' : 'amount')}
+        className="absolute left-2 z-30 inline-flex h-6 items-center gap-1.5 bg-background/80 px-2 text-[10px] font-mono text-foreground backdrop-blur-sm transition hover:bg-muted"
         style={{ top: subPaneTop ?? undefined, bottom: subPaneTop == null ? 18 : undefined }}
       >
-        <button type="button" onClick={() => onSubChartTypeChange?.('volume')}
-          className={`h-5 px-1.5 text-[10px] font-mono transition ${subChartType === 'volume' ? 'bg-ring text-panel' : 'text-muted-foreground hover:text-foreground'}`}>
-          成交量
-        </button>
-        <button type="button" onClick={() => onSubChartTypeChange?.('amount')}
-          className={`h-5 px-1.5 text-[10px] font-mono transition ${subChartType === 'amount' ? 'bg-ring text-panel' : 'text-muted-foreground hover:text-foreground'}`}>
-          成交额
-        </button>
-      </div>
+        <BarChart3 className="h-3 w-3 text-ring" />
+        {subChartType === 'amount' ? '成交额' : '成交量'}
+      </button>
 
       {showDrawingToolbar && selectedOverlayId && (
         <DrawingToolbar
@@ -568,11 +584,11 @@ function annotationToOverlay(annotation: ChartAnnotation, handlers: AnnotationOv
       name: 'rayLine',
       points: [
         {
-          timestamp: new Date(`${annotation.payload.start.date}T00:00:00`).getTime(),
+          timestamp: tradeDateToTimestamp(annotation.payload.start.date),
           value: annotation.payload.start.price
         },
         {
-          timestamp: new Date(`${annotation.payload.end.date}T00:00:00`).getTime(),
+          timestamp: tradeDateToTimestamp(annotation.payload.end.date),
           value: annotation.payload.end.price
         }
       ]
@@ -648,7 +664,7 @@ function pointToBar(
   const timestamp = point.timestamp ?? 0
   const found =
     bars.reduce<{ bar: KlineBar; diff: number } | null>((best, bar) => {
-      const diff = Math.abs(new Date(`${bar.date}T00:00:00`).getTime() - timestamp)
+      const diff = Math.abs(tradeDateToTimestamp(bar.date) - timestamp)
       if (!best || diff < best.diff) return { bar, diff }
       return best
     }, null)?.bar ?? bars[bars.length - 1]
@@ -690,11 +706,10 @@ function createSubChartIndicator(type: 'volume' | 'amount') {
         baseValue: 0,
         styles: (data: IndicatorStyleData, _indicator: unknown, defaultStyles: IndicatorDefaultStyles) => {
           const kLineData = data.current.kLineData
-          const barStyles = defaultStyles.bars?.[0]
-          if (!kLineData || !barStyles) return {}
-          if (kLineData.close > kLineData.open) return { color: barStyles.upColor }
-          if (kLineData.close < kLineData.open) return { color: barStyles.downColor }
-          return { color: barStyles.noChangeColor }
+          if (!kLineData) return {}
+          if (kLineData.close > kLineData.open) return { color: '#dc2626' }
+          if (kLineData.close < kLineData.open) return { color: '#0f9f6e' }
+          return { color: defaultStyles.bars?.[0]?.noChangeColor ?? '#737373' }
         }
       }
     ],
@@ -725,6 +740,52 @@ function createSubChartIndicator(type: 'volume' | 'amount') {
       ]
     }
   }
+}
+
+function createMaIndicator(maLines: Array<{ period: number; color: string; enabled: boolean }>) {
+  const periods = maLines.map(ma => ma.period)
+  return {
+    name: MA_INDICATOR_NAME,
+    shortName: 'MA',
+    series: IndicatorSeries.Price,
+    calcParams: periods,
+    precision: 2,
+    figures: periods.map(period => ({
+      key: `ma${period}`,
+      title: `MA${period}: `,
+      type: 'line'
+    })),
+    calc: (dataList: Array<{ close?: number }>) => {
+      const sums = new Map<number, number>()
+      return dataList.map((data, index) => {
+        const close = data.close ?? 0
+        const result: Record<string, number> = {}
+        periods.forEach(period => {
+          const nextSum = (sums.get(period) ?? 0) + close
+          sums.set(period, nextSum)
+          if (index >= period - 1) {
+            result[`ma${period}`] = nextSum / period
+            sums.set(period, nextSum - (dataList[index - period + 1]?.close ?? 0))
+          }
+        })
+        return result
+      })
+    },
+    styles: {
+      lines: maLines.map(ma => ({
+        color: ma.color,
+        size: 1,
+        style: LineType.Solid,
+        smooth: false,
+        dashedValue: []
+      }))
+    }
+  }
+}
+
+function configureScrollLimits(chart: Chart) {
+  chart.setMaxOffsetLeftDistance?.(0)
+  chart.setMaxOffsetRightDistance?.(0)
 }
 
 type IndicatorStyleData = {
