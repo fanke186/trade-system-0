@@ -3,7 +3,7 @@ import {
   init, dispose, registerLocale,
   ActionType, IndicatorSeries, YAxisType, OverlayMode, LineType
 } from 'klinecharts'
-import type { Chart, Crosshair } from 'klinecharts'
+import { CandleType, type Chart, type Crosshair } from 'klinecharts'
 import type { ChartAnnotation, ChartAnnotationPayload, KlineBar } from '../../lib/types'
 import { EmptyState } from '../shared/Panel'
 import { DrawingToolbar } from './DrawingToolbar'
@@ -142,8 +142,9 @@ export function KLineChartPanel({
           vertical: { color: 'rgba(255,255,255,0.05)' }
         },
         candle: {
+          type: CandleType.CandleUpStroke,
           bar: {
-            upColor: 'rgba(220,38,38,0.12)',
+            upColor: 'rgba(220,38,38,0)',
             upBorderColor: '#dc2626',
             upWickColor: '#dc2626',
             downColor: '#0f9f6e',
@@ -152,6 +153,9 @@ export function KLineChartPanel({
             noChangeColor: '#737373',
             noChangeBorderColor: '#737373',
             noChangeWickColor: '#737373'
+          },
+          priceMark: {
+            show: false
           }
         },
         yAxis: {
@@ -172,11 +176,17 @@ export function KLineChartPanel({
 
     chart.setBarSpace(0.01)
 
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null
     const resizeObserver =
       typeof ResizeObserver !== 'undefined'
         ? new ResizeObserver(() => {
-            chart.resize()
-            scheduleFrame(refreshSubPaneTop)
+            if (resizeTimer) clearTimeout(resizeTimer)
+            resizeTimer = setTimeout(() => {
+              if (chartRef.current) {
+                chartRef.current.resize()
+                scheduleFrame(refreshSubPaneTop)
+              }
+            }, 100)
           })
         : null
     resizeObserver?.observe(hostRef.current)
@@ -223,6 +233,7 @@ export function KLineChartPanel({
     })
 
     return () => {
+      if (resizeTimer) clearTimeout(resizeTimer)
       chart.unsubscribeAction(ActionType.OnCrosshairChange)
       resizeObserver?.disconnect()
       chartRef.current = null

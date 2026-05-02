@@ -208,10 +208,14 @@ function SecuritiesTable({
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(() => new Set())
   const [menu, setMenu] = useState<ContextMenuState>(null)
+  const [page, setPage] = useState(0)
+  const PAGE_SIZE = 15
 
-  const secQuery = useQuery({
-    queryKey: ['securities', keyword],
-    queryFn: () => commands.listSecurities(keyword, 300)
+  // Load all securities once into memory, filter/sort client-side
+  const allSecQuery = useQuery({
+    queryKey: ['securities'],
+    queryFn: () => commands.listSecurities('', 10000),
+    staleTime: 60_000
   })
   const watchlists = useQuery({
     queryKey: ['watchlists'],
@@ -251,8 +255,16 @@ function SecuritiesTable({
   }, [])
 
   const sorted = useMemo(() => {
-    const data = secQuery.data ?? []
-    return [...data].sort((a, b) => {
+    const data = allSecQuery.data ?? []
+    // Client-side filter by keyword
+    const filtered = keyword.trim()
+      ? data.filter(s =>
+          s.code.toLowerCase().includes(keyword.toLowerCase()) ||
+          s.name.toLowerCase().includes(keyword.toLowerCase()) ||
+          s.symbol.toLowerCase().includes(keyword.toLowerCase())
+        )
+      : data
+    return [...filtered].sort((a, b) => {
       const aVal = valueForSort(a, sortField)
       const bVal = valueForSort(b, sortField)
       const cmp =
@@ -261,9 +273,15 @@ function SecuritiesTable({
           : String(aVal ?? '').localeCompare(String(bVal ?? ''), 'zh-CN')
       return sortDir === 'asc' ? cmp : -cmp
     })
-  }, [secQuery.data, sortField, sortDir])
+  }, [allSecQuery.data, keyword, sortField, sortDir])
 
-  const visibleSymbols = sorted.map(security => security.symbol)
+  const totalPages = Math.ceil(sorted.length / PAGE_SIZE)
+  const paged = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+
+  // Reset page when filter/sort changes
+  useEffect(() => { setPage(0) }, [keyword, sortField, sortDir])
+
+  const visibleSymbols = paged.map(security => security.symbol)
   const allSelected = visibleSymbols.length > 0 && visibleSymbols.every(symbol => selectedSymbols.has(symbol))
 
   const handleSort = (field: SortField) => {
@@ -334,7 +352,7 @@ function SecuritiesTable({
   return (
     <div className="relative">
       <DataTable columns={columns}>
-        {sorted.map(security => (
+        {paged.map(security => (
           <SecuritiesRow
             key={security.symbol}
             security={security}
@@ -345,12 +363,23 @@ function SecuritiesTable({
           />
         ))}
       </DataTable>
-      {secQuery.isLoading ? (
+      {allSecQuery.isLoading ? (
         <div className="border-x border-b border-border px-3 py-2 text-xs text-muted-foreground">加载中...</div>
       ) : null}
-      {secQuery.isError ? (
-        <div className="border-x border-b border-border px-3 py-2 text-xs text-danger">{toErrorMessage(secQuery.error)}</div>
+      {allSecQuery.isError ? (
+        <div className="border-x border-b border-border px-3 py-2 text-xs text-danger">{toErrorMessage(allSecQuery.error)}</div>
       ) : null}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between border-x border-b border-border px-3 py-2 text-[10px] font-mono text-muted-foreground">
+          <span>共 {sorted.length} 条 · 第 {page + 1}/{totalPages} 页</span>
+          <div className="flex gap-1">
+            <Button variant="secondary" size="sm" disabled={page === 0} onClick={() => setPage(0)}>{'<<'}</Button>
+            <Button variant="secondary" size="sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>{'<'}</Button>
+            <Button variant="secondary" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>{'>'}</Button>
+            <Button variant="secondary" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>{'>>'}</Button>
+          </div>
+        </div>
+      )}
       <SecuritiesContextMenu
         menu={menu}
         watchlists={watchlists.data ?? []}
@@ -500,7 +529,7 @@ export function KlineDataPage({
   stockCode: string
   onStockCodeChange: (code: string) => void
 }) {
-  const [keyword, setKeyword] = useState(stockCode)
+  const [keyword, setKeyword] = useState('')
 
   return (
     <div className="grid gap-4">

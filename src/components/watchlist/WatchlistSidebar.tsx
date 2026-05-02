@@ -52,6 +52,13 @@ export function WatchlistSidebar({
 
   const items = currentWatchlist?.items ?? []
 
+  // Auto-select first stock in watchlist when none is selected
+  useEffect(() => {
+    if (items.length > 0 && !items.some(i => i.stockCode === activeStockCode)) {
+      onStockCodeChange(items[0].stockCode)
+    }
+  }, [items, activeStockCode, onStockCodeChange])
+
   // Fetch StockMeta for each unique stock code in the watchlist
   const stockCodes = useMemo(() => [...new Set(items.map(i => i.stockCode))], [items])
   const metaResults = useQueries({
