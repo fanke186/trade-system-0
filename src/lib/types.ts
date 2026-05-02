@@ -151,6 +151,8 @@ export type KlineCoverage = {
   daily: FrequencyCoverage
   weekly: FrequencyCoverage
   monthly: FrequencyCoverage
+  quarterly: FrequencyCoverage
+  yearly: FrequencyCoverage
   lastSyncAt?: string | null
 }
 

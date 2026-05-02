@@ -55,7 +55,7 @@ pub fn get_bars(
         select *
           from (
             select cast(trade_date as varchar) as trade_date, open, high, low, close,
-                   null as pre_close, volume, amount, turnover, adj_factor,
+                   pre_close, volume, amount, turnover, adj_factor,
                    change, change_pct, amplitude
               from {table}
              where symbol_id = ?1
@@ -168,6 +168,8 @@ pub fn get_data_coverage(conn: &DuckConnection, stock_code: &str) -> AppResult<K
         daily: coverage_for(conn, symbol_id, "bars_1d", "1d")?,
         weekly: coverage_for(conn, symbol_id, "bars_1w", "1w")?,
         monthly: coverage_for(conn, symbol_id, "bars_1M", "1M")?,
+        quarterly: coverage_for(conn, symbol_id, "bars_1Q", "1Q")?,
+        yearly: coverage_for(conn, symbol_id, "bars_1Y", "1Y")?,
         last_sync_at,
     })
 }
@@ -211,9 +213,11 @@ fn frequency_table(frequency: &str) -> AppResult<&'static str> {
         "1d" => Ok("bars_1d"),
         "1w" => Ok("bars_1w"),
         "1M" => Ok("bars_1M"),
+        "1Q" => Ok("bars_1Q"),
+        "1Y" => Ok("bars_1Y"),
         _ => Err(AppError::new(
             "invalid_frequency",
-            "frequency 只允许 1d、1w、1M",
+            "frequency 只允许 1d、1w、1M、1Q、1Y",
             true,
         )),
     }

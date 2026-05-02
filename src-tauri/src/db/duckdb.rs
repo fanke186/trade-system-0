@@ -84,6 +84,46 @@ pub fn run_migrations(conn: &DuckConnection) -> AppResult<()> {
           primary key (symbol_id, trade_date)
         );
 
+        create table if not exists bars_1Q (
+          symbol_id integer not null,
+          trade_date date not null,
+          open double not null,
+          high double not null,
+          low double not null,
+          close double not null,
+          pre_close double,
+          volume double not null,
+          amount double not null,
+          turnover double,
+          adj_factor double,
+          change double,
+          change_pct double,
+          amplitude double,
+          source text,
+          updated_at timestamp not null,
+          primary key (symbol_id, trade_date)
+        );
+
+        create table if not exists bars_1Y (
+          symbol_id integer not null,
+          trade_date date not null,
+          open double not null,
+          high double not null,
+          low double not null,
+          close double not null,
+          pre_close double,
+          volume double not null,
+          amount double not null,
+          turnover double,
+          adj_factor double,
+          change double,
+          change_pct double,
+          amplitude double,
+          source text,
+          updated_at timestamp not null,
+          primary key (symbol_id, trade_date)
+        );
+
         create table if not exists kline_sync_runs (
           id text primary key,
           stock_code text not null,
@@ -102,6 +142,8 @@ pub fn run_migrations(conn: &DuckConnection) -> AppResult<()> {
         alter table bars_1w add column if not exists change double;
         alter table bars_1w add column if not exists change_pct double;
         alter table bars_1w add column if not exists amplitude double;
+        alter table bars_1w add column if not exists pre_close double;
+        alter table bars_1M add column if not exists pre_close double;
         alter table bars_1M add column if not exists change double;
         alter table bars_1M add column if not exists change_pct double;
         alter table bars_1M add column if not exists amplitude double;
@@ -116,6 +158,8 @@ pub fn run_migrations(conn: &DuckConnection) -> AppResult<()> {
 
         update securities set stock_type = 'stock' where stock_type is null;
 
+        insert or ignore into schema_migrations (id, applied_at)
+        values ('0003_add_bars_1Q_1Y', current_timestamp);
         insert or ignore into schema_migrations (id, applied_at)
         values ('0002_add_kline_fields', current_timestamp);
         insert or ignore into schema_migrations (id, applied_at)

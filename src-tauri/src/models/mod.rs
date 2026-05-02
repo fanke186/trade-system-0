@@ -197,6 +197,8 @@ pub struct KlineCoverage {
     pub daily: FrequencyCoverage,
     pub weekly: FrequencyCoverage,
     pub monthly: FrequencyCoverage,
+    pub quarterly: FrequencyCoverage,
+    pub yearly: FrequencyCoverage,
     pub last_sync_at: Option<String>,
 }
 
@@ -209,14 +211,6 @@ pub struct KlineSyncResult {
     pub rows_written: i64,
     pub source: String,
     pub coverage: KlineCoverage,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct AggregateResult {
-    pub stock_code: String,
-    pub frequency: String,
-    pub rows_written: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

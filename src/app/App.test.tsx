@@ -16,6 +16,8 @@ vi.mock('@tauri-apps/api/core', () => ({
           daily: { frequency: '1d', startDate: null, endDate: null, rows: 0 },
           weekly: { frequency: '1w', startDate: null, endDate: null, rows: 0 },
           monthly: { frequency: '1M', startDate: null, endDate: null, rows: 0 },
+          quarterly: { frequency: '1Q', startDate: null, endDate: null, rows: 0 },
+          yearly: { frequency: '1Y', startDate: null, endDate: null, rows: 0 },
           lastSyncAt: null
         })
       case 'get_stock_reviews':
@@ -26,6 +28,10 @@ vi.mock('@tauri-apps/api/core', () => ({
         return Promise.resolve(null)
     }
   })
+}))
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(() => Promise.resolve(vi.fn()))
 }))
 
 vi.mock('klinecharts', () => ({

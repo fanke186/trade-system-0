@@ -178,13 +178,13 @@ export function WatchlistSidebar({
   }, [closeContextMenu])
 
   return (
-    <div className="flex w-40 flex-col border-r border-border bg-panel">
+    <div className="flex w-40 flex-col bg-panel/75">
       {/* Group selector */}
-      <div className="border-b border-border px-2 py-2">
+      <div className="px-2 py-2">
         <select
           value={currentWatchlist?.id ?? ''}
           onChange={handleGroupChange}
-          className="w-full border-0 border-b border-border bg-transparent pb-1 text-xs text-foreground font-mono outline-none transition-[border-color,border-bottom-width] duration-150 focus:border-b-2 focus:border-ring"
+          className="w-full border-0 bg-muted/45 px-2 py-1.5 text-xs text-foreground font-mono outline-none transition focus:bg-muted"
         >
           {watchlists.map(w => (
             <option key={w.id} value={w.id}>
@@ -195,7 +195,7 @@ export function WatchlistSidebar({
       </div>
 
       {/* Column headers */}
-      <div className="flex border-b border-border text-xs text-muted-foreground">
+      <div className="flex px-1 text-xs text-muted-foreground">
         <button
           type="button"
           onClick={() => toggleSort('name')}
@@ -238,7 +238,7 @@ export function WatchlistSidebar({
               onClick={() => onStockCodeChange(item.stockCode)}
               onContextMenu={e => handleContextMenu(e, item)}
               className={cn(
-                'flex w-full border-l-2 px-2 py-1.5 text-left transition',
+                'mx-1 mb-0.5 flex w-[calc(100%-0.5rem)] border-l-2 px-2 py-1.5 text-left transition',
                 isActive
                   ? 'border-l-ring bg-ring/10'
                   : 'border-l-transparent hover:bg-muted/40',

@@ -1,50 +1,47 @@
 import type { ReactNode } from 'react'
-import appIcon from '../../assets/qsgg.png'
+import appIcon from '../../assets/qsgg-transparent.png'
 import { routes, type PageId } from '../../app/routes'
-import type { KlineCoverage, ModelProvider, StockReview, TradeSystemSummary } from '../../lib/types'
+import type { ModelProvider, TradeSystemSummary } from '../../lib/types'
 import { cn } from '../../lib/cn'
 import { Badge } from '../shared/Badge'
-import { jsonPreview } from '../../lib/format'
 
 export function AppShell({
   activePage,
   onPageChange,
   tradeSystems,
   activeProvider,
-  stockCode,
   selectedVersionId,
-  latestReview,
   children
 }: {
   activePage: PageId
   onPageChange: (page: PageId) => void
   tradeSystems: TradeSystemSummary[]
   activeProvider?: ModelProvider
-  coverage?: KlineCoverage
-  stockCode: string
   selectedVersionId?: string
-  latestReview?: StockReview
   children: ReactNode
 }) {
   const selectedSystem = tradeSystems.find(system => system.activeVersionId === selectedVersionId)
 
   return (
-    <div className="grid h-screen grid-cols-[200px_minmax(680px,1fr)_280px] grid-rows-[48px_1fr] bg-background">
-      <aside className="row-span-2 border-r border-border bg-panel">
-        <div className="flex h-12 items-center gap-2 border-b border-border px-4">
-          <img src={appIcon} className="h-7 w-7 rounded-md object-cover" alt="QSGG" />
+    <div className="grid h-screen grid-cols-[200px_minmax(680px,1fr)] grid-rows-[56px_1fr] bg-background">
+      <aside className="row-span-2 bg-panel/90">
+        <div
+          className="flex h-14 items-center gap-2 px-3 pl-[84px]"
+          data-tauri-drag-region
+        >
+          <img src={appIcon} className="h-10 w-10 object-contain" alt="QSGG" />
           <span className="text-sm font-semibold text-foreground font-mono">QSGG</span>
         </div>
-        <nav className="p-2">
+        <nav className="px-2 py-3">
           {routes.map(route => {
             const Icon = route.icon
             return (
               <button
                 className={cn(
-                  'mb-1 flex h-9 w-full items-center gap-2 px-3 text-left text-sm transition font-mono',
+                  'mb-1 flex h-10 w-full items-center gap-2 px-3 text-left text-sm transition font-mono',
                   activePage === route.id
-                    ? 'bg-ring text-panel'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    ? 'bg-ring text-panel shadow-[0_0_24px_rgba(77,144,254,0.18)]'
+                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
                 )}
                 key={route.id}
                 onClick={() => onPageChange(route.id)}
@@ -58,7 +55,10 @@ export function AppShell({
         </nav>
       </aside>
 
-      <header className="col-span-2 flex items-center justify-between border-b border-border bg-panel px-4">
+      <header
+        className="flex items-center justify-between bg-panel/70 px-4"
+        data-tauri-drag-region
+      >
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span>交易系统</span>
           <Badge tone={selectedVersionId ? 'success' : 'warning'}>
@@ -74,37 +74,6 @@ export function AppShell({
       </header>
 
       <main className={activePage === 'my-watchlist' ? 'flex-1 min-h-0' : 'overflow-auto p-4'}>{children}</main>
-
-      {activePage !== 'my-watchlist' && (
-        <aside className="overflow-auto border-l border-border bg-panel">
-          <div className="border-b border-border px-4 py-3">
-            <div className="text-xs font-medium text-muted-foreground font-mono">当前股票</div>
-            <div className="mt-1 text-lg font-semibold text-foreground font-mono">
-              {stockCode || '-'}
-            </div>
-          </div>
-          <div className="px-4 py-3">
-            <div className="text-xs font-medium text-muted-foreground font-mono">最近评分</div>
-            {latestReview ? (
-              <div className="mt-2 grid gap-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <Badge tone={latestReview.score ? 'success' : 'warning'}>
-                    {latestReview.score ?? '-'} / 100
-                  </Badge>
-                  <Badge tone="info">{latestReview.rating}</Badge>
-                </div>
-                <p className="leading-5 text-muted-foreground">{latestReview.overallEvaluation}</p>
-                <pre className="max-h-64 overflow-auto bg-muted p-2 text-[11px] leading-4 text-foreground font-mono">
-                  {jsonPreview(latestReview.tradePlan)}
-                </pre>
-              </div>
-            ) : (
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">暂无评分记录</p>
-            )}
-          </div>
-        </aside>
-      )}
     </div>
   )
 }
-

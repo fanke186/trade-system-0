@@ -1,8 +1,9 @@
 use crate::app_state::AppState;
 use crate::error::AppResult;
-use crate::models::{AggregateResult, KlineBar, KlineCoverage, KlineSyncResult, Security};
+use crate::models::{KlineBar, KlineCoverage, KlineSyncResult, Security};
 use crate::services::{kline_query_service, kline_sync_service};
 use serde_json::json;
+use std::path::PathBuf;
 use tauri::{Emitter, State};
 
 #[tauri::command]
@@ -12,6 +13,8 @@ pub async fn sync_kline(
     stock_code: String,
     mode: String,
 ) -> AppResult<KlineSyncResult> {
+    kline_sync_service::validate_mode(&mode)?;
+
     let _ = app.emit(
         "kline-sync-progress",
         json!({
@@ -20,8 +23,47 @@ pub async fn sync_kline(
             "percent": 0,
         }),
     );
-    let conn = state.duckdb.lock().expect("duckdb lock");
-    let result = kline_sync_service::sync_kline(&conn, &stock_code, &mode);
+
+    let app_handle = app.clone();
+    let sc = stock_code.clone();
+    let m = mode.clone();
+    let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+    let script_result = tokio::task::spawn_blocking(move || {
+        kline_sync_service::run_sync_script(&app_handle, &sc, &m, &project_root)
+    })
+    .await
+    .map_err(|e| {
+        crate::error::AppError::new(
+            "sync_failed",
+            format!("脚本执行异常: {e}"),
+            true,
+        )
+    })?;
+
+    let result = match script_result {
+        Ok(sr) => {
+            let conn = state.duckdb.lock().map_err(|_| {
+                crate::error::AppError::new("lock_error", "DuckDB 锁被占用", true)
+            })?;
+            kline_sync_service::import_and_finalize(&conn, &stock_code, &mode, &sr)?
+        }
+        Err(e) => {
+            if let Ok(conn) = state.duckdb.lock() {
+                let _ = conn.execute(
+                    "insert into kline_sync_runs (id, stock_code, mode, status, started_at, rows_written, source, error) values (?1, ?2, ?3, 'failed', current_timestamp, 0, null, ?4)",
+                    duckdb::params![
+                        crate::services::common::new_id("ksr"),
+                        stock_code,
+                        mode,
+                        e.message.clone()
+                    ],
+                );
+            }
+            return Err(e);
+        }
+    };
+
     let _ = app.emit(
         "kline-sync-progress",
         json!({
@@ -30,7 +72,8 @@ pub async fn sync_kline(
             "percent": 100,
         }),
     );
-    result
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -64,14 +107,4 @@ pub fn list_securities(
 ) -> AppResult<Vec<Security>> {
     let conn = state.duckdb.lock().expect("duckdb lock");
     kline_query_service::list_securities(&conn, keyword, limit)
-}
-
-#[tauri::command]
-pub fn aggregate_kline(
-    state: State<'_, AppState>,
-    stock_code: Option<String>,
-    frequency: String,
-) -> AppResult<AggregateResult> {
-    let conn = state.duckdb.lock().expect("duckdb lock");
-    kline_sync_service::aggregate_kline(&conn, stock_code, &frequency)
 }

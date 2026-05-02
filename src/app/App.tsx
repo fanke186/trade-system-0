@@ -28,20 +28,8 @@ export function App() {
     commands.syncSecuritiesMetadata().catch(() => {})
   }, [])
 
-  const coverageQuery = useQuery({
-    queryKey: ['coverage', stockCode],
-    queryFn: () => commands.getDataCoverage(stockCode),
-    enabled: Boolean(stockCode)
-  })
-  const reviewsQuery = useQuery({
-    queryKey: ['stock-reviews', stockCode, selectedVersionId],
-    queryFn: () => commands.getStockReviews(stockCode, selectedVersionId),
-    enabled: Boolean(stockCode)
-  })
-
   const tradeSystems = tradeSystemsQuery.data ?? []
   const activeProvider = providersQuery.data?.find(provider => provider.isActive)
-  const latestReview = reviewsQuery.data?.[0]
 
   const activeVersionId = useMemo(() => {
     if (selectedVersionId) return selectedVersionId
@@ -86,10 +74,7 @@ export function App() {
       onPageChange={setActivePage}
       tradeSystems={tradeSystems}
       activeProvider={activeProvider}
-      coverage={coverageQuery.data}
-      stockCode={stockCode}
       selectedVersionId={activeVersionId}
-      latestReview={latestReview}
     >
       {(Object.keys(page) as PageId[]).map(id => (
         <div key={id} className={id === activePage ? 'contents' : 'hidden'}>

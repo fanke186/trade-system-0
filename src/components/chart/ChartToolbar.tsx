@@ -1,7 +1,7 @@
 import { Settings } from 'lucide-react'
 import { cn } from '../../lib/cn'
 
-type Frequency = '1d' | '1w' | '1M'
+type Frequency = '1d' | '1w' | '1M' | '1Q' | '1Y'
 type AdjMode = 'pre' | 'post' | 'none'
 type DrawingTool = 'horizontal_line' | 'ray' | null
 
@@ -28,18 +28,16 @@ export function ChartToolbar({
   drawingTool: DrawingTool
   onDrawingToolChange: (t: DrawingTool) => void
 }) {
-  const freqLabels: Record<Frequency, string> = { '1d': '日K', '1w': '周K', '1M': '月K' }
+  const freqLabels: Record<Frequency, string> = { '1d': '日K', '1w': '周K', '1M': '月K', '1Q': '季K', '1Y': '年K' }
   const adjLabels: Record<AdjMode, string> = { pre: '前复权', post: '后复权', none: '除权' }
 
   return (
-    <div className="flex h-10 items-center gap-3 border-b border-border bg-panel px-3">
+    <div className="flex h-10 items-center gap-4 bg-panel/65 px-3 shadow-[0_1px_0_rgba(255,255,255,0.03)]">
       {/* Stock name + code */}
       <div className="flex items-baseline gap-1.5 whitespace-nowrap">
         <span className="text-sm font-semibold text-foreground">{stockName}</span>
         <span className="text-xs text-muted-foreground font-mono">{stockCode}</span>
       </div>
-
-      <div className="h-4 w-px bg-border" />
 
       {/* Frequency buttons */}
       <div className="flex gap-0.5">
@@ -64,7 +62,7 @@ export function ChartToolbar({
       <select
         value={adjMode}
         onChange={e => onAdjModeChange(e.target.value as AdjMode)}
-        className="h-7 border-0 border-b border-border bg-transparent px-1 text-xs text-foreground font-mono outline-none transition-[border-color,border-bottom-width] duration-150 focus:border-b-2 focus:border-ring"
+        className="h-7 border-0 bg-muted/40 px-2 text-xs text-foreground font-mono outline-none transition focus:bg-muted"
       >
         {(Object.entries(adjLabels) as [AdjMode, string][]).map(([key, label]) => (
           <option key={key} value={key}>
@@ -72,8 +70,6 @@ export function ChartToolbar({
           </option>
         ))}
       </select>
-
-      <div className="h-4 w-px bg-border" />
 
       {/* Drawing tool buttons */}
       <div className="flex gap-0.5">

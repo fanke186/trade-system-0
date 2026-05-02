@@ -83,7 +83,7 @@ export const commands = {
     call<KlineSyncResult>('sync_kline', { stockCode, mode }),
   getBars: (
     stockCode: string,
-    frequency: '1d' | '1w' | '1M',
+    frequency: '1d' | '1w' | '1M' | '1Q' | '1Y',
     startDate?: string,
     endDate?: string,
     limit?: number,
@@ -96,11 +96,6 @@ export const commands = {
     call<KlineCoverage>('get_data_coverage', { stockCode }),
   listSecurities: (keyword?: string, limit?: number) =>
     call<Security[]>('list_securities', { keyword, limit }),
-  aggregateKline: (stockCode: string | null, frequency: '1w' | '1M') =>
-    call<{ stockCode: string; frequency: string; rowsWritten: number }>('aggregate_kline', {
-      stockCode,
-      frequency
-    }),
 
   scoreStock: (stockCode: string, tradeSystemVersionId: string, providerId?: string | null) =>
     call<StockReview>('score_stock', {

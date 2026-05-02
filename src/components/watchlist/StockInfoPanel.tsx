@@ -40,9 +40,9 @@ export function StockInfoPanel({
     : ''
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full flex-col bg-panel/75">
       {/* Stock metadata card */}
-      <div className="p-3 border-b border-border">
+      <div className="p-3 shadow-[0_1px_0_rgba(255,255,255,0.03)]">
         <div className="flex items-center gap-1.5 mb-1">
           <span className="text-base font-semibold">{m?.name || stockCode}</span>
           {m?.stale && (
@@ -80,7 +80,7 @@ export function StockInfoPanel({
         <div className="text-[10px] font-mono text-muted-foreground mb-2">交易系统评价</div>
         {(reviews.data ?? []).length > 0 ? (
           reviews.data!.map(review => (
-            <div key={review.id} className="mb-1.5 p-2 bg-muted/40 border border-border text-xs">
+            <div key={review.id} className="mb-1.5 bg-muted/35 p-2 text-xs">
               <div className="flex items-center justify-between mb-1">
                 <span className="font-medium text-[11px]">交易系统</span>
                 <Badge tone={review.rating === 'focus' ? 'success' : review.rating === 'reject' ? 'danger' : 'warning'}>

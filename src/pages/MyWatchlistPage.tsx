@@ -8,7 +8,7 @@ import { ChartToolbar } from '../components/chart/ChartToolbar'
 import { SettingsPopover } from '../components/chart/SettingsPopover'
 import { CrosshairTooltip } from '../components/chart/CrosshairTooltip'
 import type { ChartSettings } from '../components/chart/SettingsPopover'
-import type { ChartAnnotationPayload, KlineBar } from '../lib/types'
+import type { ChartAnnotation, ChartAnnotationPayload, KlineBar } from '../lib/types'
 import { commands } from '../lib/commands'
 
 const DEFAULT_SETTINGS: ChartSettings = {
@@ -30,7 +30,7 @@ export function MyWatchlistPage({
   selectedVersionId?: string
   onStockCodeChange: (code: string) => void
 }) {
-  const [frequency, setFrequency] = useState<'1d' | '1w' | '1M'>('1d')
+  const [frequency, setFrequency] = useState<'1d' | '1w' | '1M' | '1Q' | '1Y'>('1d')
   const [adjMode, setAdjMode] = useState<'pre' | 'post' | 'none'>('pre')
   const [subChartType, setSubChartType] = useState<'volume' | 'amount'>('volume')
   const [settings, setSettings] = useState<ChartSettings>(DEFAULT_SETTINGS)
@@ -40,10 +40,14 @@ export function MyWatchlistPage({
   const [crosshairPos, setCrosshairPos] = useState<'top-left' | 'top-right'>('top-right')
 
   const queryClient = useQueryClient()
+  const invalidateAnnotations = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['annotations', stockCode, selectedVersionId] })
+  }, [queryClient, selectedVersionId, stockCode])
 
   const saveMutation = useMutation({
-    mutationFn: (payload: ChartAnnotationPayload) =>
+    mutationFn: ({ id, payload }: { id?: string; payload: ChartAnnotationPayload }) =>
       commands.saveChartAnnotation({
+        id,
         stockCode,
         tradeSystemVersionId: selectedVersionId ?? null,
         reviewId: null,
@@ -53,13 +57,26 @@ export function MyWatchlistPage({
       }),
     onSuccess: () => {
       setDrawingTool(null)
-      void queryClient.invalidateQueries({ queryKey: ['annotations', stockCode, selectedVersionId] })
+      invalidateAnnotations()
     },
   })
 
   const handleDrawComplete = useCallback((payload: ChartAnnotationPayload) => {
-    saveMutation.mutate(payload)
+    saveMutation.mutate({ payload })
   }, [saveMutation])
+
+  const handleAnnotationUpdate = useCallback((annotation: ChartAnnotation, payload: ChartAnnotationPayload) => {
+    saveMutation.mutate({ id: annotation.id, payload })
+  }, [saveMutation])
+
+  const deleteMutation = useMutation({
+    mutationFn: (annotationId: string) => commands.deleteChartAnnotation(annotationId),
+    onSuccess: invalidateAnnotations,
+  })
+
+  const handleAnnotationDelete = useCallback((annotation: ChartAnnotation) => {
+    deleteMutation.mutate(annotation.id)
+  }, [deleteMutation])
 
   const meta = useQuery({
     queryKey: ['stock-meta', stockCode],
@@ -115,6 +132,8 @@ export function MyWatchlistPage({
             annotations={annotationsQuery.data ?? []}
             drawingTool={drawingTool}
             onDrawComplete={handleDrawComplete}
+            onAnnotationUpdate={handleAnnotationUpdate}
+            onAnnotationDelete={handleAnnotationDelete}
             subChartType={subChartType}
             maLines={settings.maLines}
             coordType={settings.coordType}
@@ -131,6 +150,10 @@ export function MyWatchlistPage({
 
         {saveMutation.isError ? (
           <p className="mt-1 px-3 text-xs text-danger">{toErrorMessage(saveMutation.error)}</p>
+        ) : null}
+
+        {deleteMutation.isError ? (
+          <p className="mt-1 px-3 text-xs text-danger">{toErrorMessage(deleteMutation.error)}</p>
         ) : null}
       </div>
 

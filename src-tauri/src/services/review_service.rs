@@ -7,7 +7,6 @@ use crate::models::{ChatMessage, DailyReviewItem, DailyReviewRun, StockReview};
 use crate::services::annotation_service;
 use crate::services::common::{new_id, now_iso, sha256_hex};
 use crate::services::kline_query_service::{get_bars, get_data_coverage};
-use crate::services::kline_sync_service;
 use crate::services::model_provider_service::{get_active_provider, get_provider, resolve_api_key};
 use crate::services::trade_system_service::get_version;
 use crate::services::watchlist_service::list_items;
@@ -20,7 +19,7 @@ pub async fn score_stock(
     trade_system_version_id: String,
     provider_id: Option<String>,
 ) -> AppResult<StockReview> {
-    let (version, coverage, daily, weekly, monthly, annotations, provider) = {
+    let (version, coverage, daily, weekly, monthly, quarterly, yearly, annotations, provider) = {
         let sqlite = state.sqlite.lock().expect("sqlite lock");
         let duck = state.duckdb.lock().expect("duckdb lock");
         let version = get_version(&sqlite, &trade_system_version_id)?;
@@ -52,6 +51,10 @@ pub async fn score_stock(
         let daily = get_bars(&duck, &stock_code, "1d", None, None, Some(160), None)?;
         let weekly = get_bars(&duck, &stock_code, "1w", None, None, Some(80), None)?;
         let monthly = get_bars(&duck, &stock_code, "1M", None, None, Some(60), None)?;
+        let quarterly = get_bars(&duck, &stock_code, "1Q", None, None, Some(40), None)
+            .unwrap_or_default();
+        let yearly = get_bars(&duck, &stock_code, "1Y", None, None, Some(20), None)
+            .unwrap_or_default();
         let annotations = annotation_service::list_chart_annotations(
             &sqlite,
             &stock_code,
@@ -69,6 +72,8 @@ pub async fn score_stock(
             daily,
             weekly,
             monthly,
+            quarterly,
+            yearly,
             annotations,
             provider,
         )
@@ -79,6 +84,8 @@ pub async fn score_stock(
         "daily": summarize_bars(&daily),
         "weekly": summarize_bars(&weekly),
         "monthly": summarize_bars(&monthly),
+        "quarterly": summarize_bars(&quarterly),
+        "yearly": summarize_bars(&yearly),
         "recent_daily": daily.iter().rev().take(20).cloned().collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>(),
         "recent_weekly": weekly.iter().rev().take(16).cloned().collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>(),
         "recent_monthly": monthly.iter().rev().take(12).cloned().collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>()
@@ -169,8 +176,9 @@ pub async fn run_daily_review(
     for item in items {
         let sync_status = {
             let duck = state.duckdb.lock().expect("duckdb lock");
-            match kline_sync_service::sync_kline(&duck, &item.stock_code, "incremental") {
-                Ok(result) => result.status,
+            match get_data_coverage(&duck, &item.stock_code) {
+                Ok(coverage) if coverage.daily.rows > 0 => "ok".to_string(),
+                Ok(_) => "no_data".to_string(),
                 Err(error) => {
                     results.push(DailyReviewItem {
                         stock_code: item.stock_code.clone(),

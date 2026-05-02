@@ -2,7 +2,6 @@ mod app_state;
 mod commands;
 mod db;
 mod error;
-mod kline;
 mod llm;
 mod models;
 mod services;
@@ -46,7 +45,6 @@ pub fn run() {
             commands::kline::get_bars,
             commands::kline::get_data_coverage,
             commands::kline::list_securities,
-            commands::kline::aggregate_kline,
             commands::review::score_stock,
             commands::review::get_stock_reviews,
             commands::review::run_daily_review,
