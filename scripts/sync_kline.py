@@ -342,7 +342,7 @@ def main() -> int:
     parser.add_argument("--periods", default="1d,1w,1M,1Q,1Y")
     parser.add_argument("--adj", default="none,forward,backward")
     parser.add_argument("--mode", choices=["full", "incremental"], default="incremental")
-    parser.add_argument("--data-dir", default="./data/klines/current")
+    parser.add_argument("--data-dir", default=".data/klines/current")
     parser.add_argument("--batch-size", type=int, default=100)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

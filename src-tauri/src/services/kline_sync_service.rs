@@ -7,9 +7,10 @@ use serde_json::Value;
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 
-const DEFAULT_DATA_DIR: &str = "./data/klines/current";
+const DEFAULT_DATA_DIR: &str = "../.data/klines/current";
 const PERIODS: [&str; 5] = ["1d", "1w", "1M", "1Q", "1Y"];
 const ADJ_MODES: [&str; 3] = ["none", "forward", "backward"];
 
@@ -29,6 +30,16 @@ pub fn run_sync_script(
     let python = find_python()?;
     let script = find_script(project_root)?;
     let data_dir = project_root.join(DEFAULT_DATA_DIR);
+
+    tracing::info!(
+        python = %python,
+        script = %script.display(),
+        data_dir = %data_dir.display(),
+        stock_code,
+        mode,
+        scope,
+        "准备启动同步脚本"
+    );
 
     let mut cmd = Command::new(&python);
     cmd.arg(&script)
@@ -50,6 +61,8 @@ pub fn run_sync_script(
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
+    tracing::info!(cmd = ?cmd, "Python 命令构建完成");
+
     let _ = app.emit(
         "kline-sync-progress",
         serde_json::json!({
@@ -61,6 +74,7 @@ pub fn run_sync_script(
     );
 
     let mut child = cmd.spawn().map_err(|e| {
+        tracing::error!(error = %e, python = %python, script = %script.display(), "无法启动 Python 子进程");
         AppError::with_detail(
             "script_spawn_failed",
             format!("无法启动 Python 脚本: {e}"),
@@ -69,11 +83,31 @@ pub fn run_sync_script(
         )
     })?;
 
+    tracing::info!(pid = child.id(), "Python 子进程已启动");
+
+    // Drain stderr continuously in a background thread so the pipe buffer never fills.
+    // If stderr blocks, the Python process blocks, which deadlocks stdout reading.
+    let stderr = child.stderr.take().expect("stderr piped");
+    let stderr_lines: Arc<Mutex<Vec<String>>> = Default::default();
+    let stderr_captured = stderr_lines.clone();
+    std::thread::spawn(move || {
+        let reader = std::io::BufReader::new(stderr);
+        for line in reader.lines() {
+            if let Ok(line) = line {
+                if !line.trim().is_empty() {
+                    stderr_captured.lock().unwrap().push(line);
+                }
+            }
+        }
+    });
+
     let stdout = child.stdout.take().expect("stdout piped");
     let reader = std::io::BufReader::new(stdout);
     let mut last_progress = 0;
+    let mut line_count = 0u64;
 
     for line in reader.lines() {
+        line_count += 1;
         let line = line.map_err(|e| {
             AppError::with_detail(
                 "script_read_error",
@@ -165,7 +199,9 @@ pub fn run_sync_script(
         }
     }
 
-    let output = child.wait_with_output().map_err(|e| {
+    tracing::info!(line_count, "stdout 读取完成，等待子进程退出");
+
+    let status = child.wait().map_err(|e| {
         AppError::with_detail(
             "script_wait_failed",
             format!("等待脚本退出失败: {e}"),
@@ -174,13 +210,20 @@ pub fn run_sync_script(
         )
     })?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    if !status.success() {
+        let captured = stderr_lines.lock().unwrap();
+        let stderr_tail: String = captured.iter().rev().take(20).cloned().collect::<Vec<_>>().join("\n");
+        tracing::error!(
+            exit_code = ?status.code(),
+            stderr_lines = captured.len(),
+            stderr_tail = %stderr_tail,
+            "同步脚本异常退出"
+        );
         return Err(AppError::with_detail(
             "script_failed",
-            format!("同步脚本异常退出: exit code {}", output.status.code().unwrap_or(-1)),
+            format!("同步脚本异常退出: exit code {}", status.code().unwrap_or(-1)),
             true,
-            serde_json::json!({ "stderr": stderr }),
+            serde_json::json!({ "stderr": stderr_tail }),
         ));
     }
 
@@ -297,6 +340,7 @@ fn global_frequency_coverage(conn: &DuckConnection, frequency: &str) -> AppResul
 fn find_python() -> AppResult<String> {
     if let Ok(path) = std::env::var("PYTHON_BIN") {
         if !path.is_empty() {
+            tracing::info!(python = %path, source = "PYTHON_BIN", "找到 Python");
             return Ok(path);
         }
     }
@@ -308,9 +352,11 @@ fn find_python() -> AppResult<String> {
             .status()
             .is_ok()
         {
+            tracing::info!(python = %candidate, "找到 Python");
             return Ok(candidate.to_string());
         }
     }
+    tracing::error!("未找到 Python 运行环境");
     Err(AppError::new(
         "python_not_found",
         "未找到 Python 运行环境，请安装 Python 3 或设置 PYTHON_BIN 环境变量",
@@ -322,6 +368,7 @@ fn find_script(project_root: &std::path::Path) -> AppResult<PathBuf> {
     if let Ok(path) = std::env::var("SYNC_SCRIPT_PATH") {
         let p = PathBuf::from(&path);
         if p.exists() {
+            tracing::info!(script = %p.display(), source = "SYNC_SCRIPT_PATH", "找到同步脚本");
             return Ok(p);
         }
     }
@@ -331,10 +378,17 @@ fn find_script(project_root: &std::path::Path) -> AppResult<PathBuf> {
         PathBuf::from("./scripts/sync_kline.py"),
     ];
     for candidate in &candidates {
-        if candidate.exists() {
+        let exists = candidate.exists();
+        tracing::debug!(path = %candidate.display(), exists, "检查脚本路径");
+        if exists {
+            tracing::info!(script = %candidate.display(), "找到同步脚本");
             return Ok(candidate.clone());
         }
     }
+    tracing::error!(
+        project_root = %project_root.display(),
+        "找不到 sync_kline.py"
+    );
     Err(AppError::new(
         "script_not_found",
         "找不到 sync_kline.py，请设置 SYNC_SCRIPT_PATH 环境变量",

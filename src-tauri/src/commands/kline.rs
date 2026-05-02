@@ -14,6 +14,13 @@ pub async fn sync_kline(
     mode: String,
     scope: Option<String>,
 ) -> AppResult<KlineSyncResult> {
+    tracing::info!(
+        stock_code = %stock_code,
+        mode = %mode,
+        scope = ?scope,
+        "sync_kline 命令被调用"
+    );
+
     kline_sync_service::validate_mode(&mode)?;
     let sync_scope = scope.unwrap_or_else(|| {
         if stock_code.is_empty() {
@@ -22,6 +29,8 @@ pub async fn sync_kline(
             "symbols".to_string()
         }
     });
+
+    tracing::info!(sync_scope = %sync_scope, "sync_kline scope 解析完成");
 
     let _ = app.emit(
         "kline-sync-progress",
@@ -38,11 +47,19 @@ pub async fn sync_kline(
     let s = sync_scope.clone();
     let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
+    tracing::info!(
+        project_root = %project_root.display(),
+        data_dir = %project_root.join("../.data/klines/current").display(),
+        "sync_kline 项目路径"
+    );
+
     let script_result = tokio::task::spawn_blocking(move || {
+        tracing::info!("开始在阻塞线程中执行同步脚本");
         kline_sync_service::run_sync_script(&app_handle, &sc, &m, &s, &project_root)
     })
     .await
     .map_err(|e| {
+        tracing::error!(error = %e, "spawn_blocking 失败");
         crate::error::AppError::new(
             "sync_failed",
             format!("脚本执行异常: {e}"),
@@ -50,14 +67,21 @@ pub async fn sync_kline(
         )
     })?;
 
+    tracing::info!(script_ok = script_result.is_ok(), "同步脚本执行完成");
+
     let result = match script_result {
         Ok(sr) => {
+            tracing::info!("开始导入 Parquet 到 DuckDB");
             let conn = state.duckdb.lock().map_err(|_| {
+                tracing::error!("获取 DuckDB 锁失败");
                 crate::error::AppError::new("lock_error", "DuckDB 锁被占用", true)
             })?;
-            kline_sync_service::import_and_finalize(&conn, &stock_code, &mode, &sr)?
+            let import_result = kline_sync_service::import_and_finalize(&conn, &stock_code, &mode, &sr)?;
+            tracing::info!(rows_written = import_result.rows_written, "导入完成");
+            import_result
         }
         Err(e) => {
+            tracing::error!(error_code = %e.code, error_msg = %e.message, "同步脚本失败");
             if let Ok(conn) = state.duckdb.lock() {
                 let _ = conn.execute(
                     "insert into kline_sync_runs (id, stock_code, mode, status, started_at, rows_written, source, error) values (?1, ?2, ?3, 'failed', current_timestamp, 0, null, ?4)",
