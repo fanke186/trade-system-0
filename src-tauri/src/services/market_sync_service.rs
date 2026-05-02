@@ -446,7 +446,9 @@ fn aggregate_period_incremental(
 ) -> AppResult<i64> {
     // Delete existing aggregate rows for changed symbols before re-inserting
     if !changed_symbols.is_empty() {
-        let placeholders: Vec<String> = changed_symbols.iter().enumerate()
+        let placeholders: Vec<String> = changed_symbols
+            .iter()
+            .enumerate()
             .map(|(i, _)| format!("?{}", i + 1))
             .collect();
         let sql = format!(
@@ -464,7 +466,9 @@ fn aggregate_period_incremental(
     let symbol_filter = if changed_symbols.is_empty() {
         String::new()
     } else {
-        let placeholders: Vec<String> = changed_symbols.iter().enumerate()
+        let placeholders: Vec<String> = changed_symbols
+            .iter()
+            .enumerate()
             .map(|(i, _)| format!("?{}", i + 1))
             .collect();
         format!("and symbol in ({})", placeholders.join(", "))

@@ -447,8 +447,9 @@ pub async fn propose_revision(
 ) -> AppResult<TradeSystemRevisionProposal> {
     let provider = {
         let conn = state.sqlite.lock().expect("sqlite lock");
-        get_active_provider(&conn)?
-            .ok_or_else(|| AppError::new("provider_request_failed", "未配置活跃模型 Provider", true))?
+        get_active_provider(&conn)?.ok_or_else(|| {
+            AppError::new("provider_request_failed", "未配置活跃模型 Provider", true)
+        })?
     };
     let api_key = resolve_api_key(&state.app_dir, &provider)?;
     let system_prompt = build_revision_system_prompt(&input.name, &input.current_markdown);
@@ -472,7 +473,7 @@ pub async fn propose_revision(
         },
     )
     .await?;
-    let value: serde_json::Value = serde_json::from_str(&content)?;
+    let value = parse_revision_response(&content, &input.current_markdown)?;
     Ok(TradeSystemRevisionProposal {
         assistant_message: value
             .get("assistantMessage")
@@ -502,6 +503,38 @@ pub async fn propose_revision(
             })
             .unwrap_or_default(),
     })
+}
+
+fn parse_revision_response(content: &str, current_markdown: &str) -> AppResult<serde_json::Value> {
+    let trimmed = content.trim();
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        return Ok(value);
+    }
+    if let Some(extracted) = extract_json_object(trimmed) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&extracted) {
+            return Ok(value);
+        }
+    }
+    let fallback_message = if trimmed.starts_with('{') || trimmed.starts_with("```") {
+        "模型已经返回内容，但修订 JSON 不完整或被截断。请把需求拆小一点再发，我会继续基于当前预览修订。"
+    } else {
+        trimmed
+    };
+    Ok(serde_json::json!({
+        "assistantMessage": fallback_message,
+        "markdown": current_markdown,
+        "diff": "模型返回内容不是可解析的修订 JSON，已保留原始回复。",
+        "gapQuestions": []
+    }))
+}
+
+fn extract_json_object(content: &str) -> Option<String> {
+    let start = content.find('{')?;
+    let end = content.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    Some(content[start..=end].to_string())
 }
 
 pub fn add_stocks(
@@ -548,7 +581,8 @@ fn build_revision_system_prompt(name: &str, current_markdown: &str) -> String {
 - 如果用户已经给出足够信息，直接把信息整合进 Markdown。
 - 只返回 JSON 对象，不返回 Markdown 代码块。
 - JSON 必须包含 assistantMessage、markdown、diff、gapQuestions。
-- markdown 是完整交易系统 Markdown，不是片段；如果只需要追问，可以保持原文不变。
+- markdown 是完整交易系统 Markdown，不是片段；如果只需要追问或用户只是确认连通，可以保持原文不变。
+- 控制输出长度。不要为了复述模板而大段重写；只有用户给出明确新规则时才改对应段落。
 - diff 用简短中文说明本轮改动或为什么暂不改。
 
 交易系统名称：{name}

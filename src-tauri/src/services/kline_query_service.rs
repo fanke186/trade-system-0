@@ -104,6 +104,38 @@ pub fn get_bars(
     let symbol = resolve_symbol(conn, stock_code)?;
     let adj_mode = normalize_adj(adj.as_deref());
     let limit = limit.unwrap_or(500).clamp(1, 5000);
+    let mut values = query_bars(
+        conn,
+        &symbol,
+        frequency,
+        start_date.as_deref(),
+        end_date.as_deref(),
+        limit,
+        adj_mode,
+    )?;
+    if values.is_empty() && adj_mode != "none" {
+        values = query_bars(
+            conn,
+            &symbol,
+            frequency,
+            start_date.as_deref(),
+            end_date.as_deref(),
+            limit,
+            "none",
+        )?;
+    }
+    Ok(values)
+}
+
+fn query_bars(
+    conn: &DuckConnection,
+    symbol: &str,
+    frequency: &str,
+    start_date: Option<&str>,
+    end_date: Option<&str>,
+    limit: i64,
+    adj_mode: &str,
+) -> AppResult<Vec<KlineBar>> {
     let mut stmt = conn.prepare(
         r#"
         select *
@@ -196,16 +228,17 @@ fn coverage_for(
 }
 
 pub fn resolve_symbol(conn: &DuckConnection, input: &str) -> AppResult<String> {
+    let normalized = input.trim().to_uppercase();
     conn.query_row(
         r#"
         select symbol
           from securities
-         where symbol = ?1 or code = ?1
-         order by case when symbol = ?1 then 0 when stock_type = 'stock' then 1 else 2 end,
+         where upper(symbol) = ?1 or code = ?1
+         order by case when upper(symbol) = ?1 then 0 when stock_type = 'stock' then 1 else 2 end,
                   case exchange when 'SZ' then 0 when 'SH' then 1 when 'BJ' then 2 else 3 end
          limit 1
         "#,
-        duckdb::params![input],
+        duckdb::params![normalized],
         |row| row.get(0),
     )
     .optional()?

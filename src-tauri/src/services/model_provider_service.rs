@@ -75,10 +75,14 @@ pub fn save_model_provider(
     let api_key_ref = if let Some(api_key) = input.api_key.filter(|key| !key.trim().is_empty()) {
         write_local_secret(app_dir, &id, &api_key)?;
         format!("local:{}", id)
+    } else if input.api_key_ref.as_deref() == Some("local:***") {
+        existing_key_ref
+            .filter(|value| value != "local:***")
+            .unwrap_or_else(|| format!("local:{}", id))
     } else if let Some(api_key_ref) = input.api_key_ref.filter(|value| !value.trim().is_empty()) {
         api_key_ref
     } else {
-        existing_key_ref.unwrap_or_else(|| "env:OPENAI_API_KEY".to_string())
+        existing_key_ref.unwrap_or_default()
     };
 
     let provider = ModelProvider {
@@ -188,6 +192,13 @@ pub async fn test_model_provider(
 }
 
 pub fn resolve_api_key(app_dir: &Path, provider: &ModelProvider) -> AppResult<String> {
+    if provider.api_key_ref.trim().is_empty() {
+        return Err(AppError::new(
+            "provider_auth_failed",
+            "请先填写并保存该 Provider 的 API Key",
+            true,
+        ));
+    }
     if let Some(env_name) = provider.api_key_ref.strip_prefix("env:") {
         return std::env::var(env_name).map_err(|_| {
             AppError::new(

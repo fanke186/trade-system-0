@@ -23,7 +23,7 @@ pub fn run_migrations(conn: &DuckConnection) -> AppResult<()> {
 
         create table if not exists securities (
           symbol text primary key,
-          code text not null unique,
+          code text not null,
           name text not null,
           exchange text not null,
           board text,
@@ -204,6 +204,7 @@ pub fn run_migrations(conn: &DuckConnection) -> AppResult<()> {
 
         create index if not exists idx_kline_mapping_app on kline_mapping(app_symbol);
         create index if not exists idx_kline_mapping_code on kline_mapping(code);
+        create index if not exists idx_securities_code_exchange on securities(code, exchange);
         create index if not exists idx_securities_market_symbol on securities(market_symbol);
 
         alter table securities add column if not exists latest_price double;

@@ -6,7 +6,7 @@ use crate::llm::prompts::{build_agent_prompt, build_scoring_user_prompt};
 use crate::models::{ChatMessage, DailyReviewItem, DailyReviewRun, StockReview};
 use crate::services::annotation_service;
 use crate::services::common::{new_id, now_iso, sha256_hex};
-use crate::services::kline_query_service::{get_bars, get_data_coverage};
+use crate::services::kline_query_service::{get_bars, get_data_coverage, resolve_symbol};
 use crate::services::model_provider_service::{get_active_provider, get_provider, resolve_api_key};
 use crate::services::trade_system_service::{get_version, update_trade_system_stock_review};
 use crate::services::watchlist_service::list_items;
@@ -19,13 +19,17 @@ pub async fn score_stock(
     trade_system_version_id: String,
     provider_id: Option<String>,
 ) -> AppResult<StockReview> {
+    let normalized_stock_code = {
+        let duck = state.duckdb.lock().expect("duckdb lock");
+        resolve_symbol(&duck, &stock_code)?
+    };
     let (version, coverage, daily, weekly, monthly, quarterly, yearly, annotations, provider) = {
         let sqlite = state.sqlite.lock().expect("sqlite lock");
         let duck = state.duckdb.lock().expect("duckdb lock");
         let version = get_version(&sqlite, &trade_system_version_id)?;
         if !version.completeness_report.can_score {
             return Ok(data_required_review(
-                &stock_code,
+                &normalized_stock_code,
                 &version.trade_system_id,
                 &version.id,
                 "invalid_trade_system",
@@ -35,10 +39,10 @@ pub async fn score_stock(
             ));
         }
 
-        let coverage = get_data_coverage(&duck, &stock_code)?;
+        let coverage = get_data_coverage(&duck, &normalized_stock_code)?;
         if coverage.daily.rows < 60 || coverage.weekly.rows < 12 || coverage.monthly.rows < 6 {
             return Ok(data_required_review(
-                &stock_code,
+                &normalized_stock_code,
                 &version.trade_system_id,
                 &version.id,
                 "data_required",
@@ -48,16 +52,56 @@ pub async fn score_stock(
             ));
         }
 
-        let daily = get_bars(&duck, &stock_code, "1d", None, None, Some(160), None)?;
-        let weekly = get_bars(&duck, &stock_code, "1w", None, None, Some(80), None)?;
-        let monthly = get_bars(&duck, &stock_code, "1M", None, None, Some(60), None)?;
-        let quarterly =
-            get_bars(&duck, &stock_code, "1Q", None, None, Some(40), None).unwrap_or_default();
-        let yearly =
-            get_bars(&duck, &stock_code, "1Y", None, None, Some(20), None).unwrap_or_default();
+        let daily = get_bars(
+            &duck,
+            &normalized_stock_code,
+            "1d",
+            None,
+            None,
+            Some(160),
+            None,
+        )?;
+        let weekly = get_bars(
+            &duck,
+            &normalized_stock_code,
+            "1w",
+            None,
+            None,
+            Some(80),
+            None,
+        )?;
+        let monthly = get_bars(
+            &duck,
+            &normalized_stock_code,
+            "1M",
+            None,
+            None,
+            Some(60),
+            None,
+        )?;
+        let quarterly = get_bars(
+            &duck,
+            &normalized_stock_code,
+            "1Q",
+            None,
+            None,
+            Some(40),
+            None,
+        )
+        .unwrap_or_default();
+        let yearly = get_bars(
+            &duck,
+            &normalized_stock_code,
+            "1Y",
+            None,
+            None,
+            Some(20),
+            None,
+        )
+        .unwrap_or_default();
         let annotations = annotation_service::list_chart_annotations(
             &sqlite,
-            &stock_code,
+            &normalized_stock_code,
             Some(version.id.clone()),
         )?;
         let provider = if let Some(provider_id) = provider_id {
@@ -92,8 +136,12 @@ pub async fn score_stock(
     });
     let annotation_json = serde_json::to_value(&annotations)?;
     let system_prompt = build_agent_prompt(&version);
-    let user_prompt =
-        build_scoring_user_prompt(&stock_code, &coverage_json, &bars_summary, &annotation_json);
+    let user_prompt = build_scoring_user_prompt(
+        &normalized_stock_code,
+        &coverage_json,
+        &bars_summary,
+        &annotation_json,
+    );
     let prompt_hash = sha256_hex(&format!("{}\n{}", system_prompt, user_prompt));
 
     let api_key = resolve_api_key(&state.app_dir, &provider)?;
@@ -116,7 +164,7 @@ pub async fn score_stock(
     let parsed = parse_and_validate_stock_review(&content)?;
     let review = persist_review(
         state,
-        &stock_code,
+        &normalized_stock_code,
         &version.trade_system_id,
         &version.id,
         Some(provider.id.clone()),

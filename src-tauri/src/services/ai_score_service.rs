@@ -35,7 +35,10 @@ struct AiScoreTarget {
     name: String,
 }
 
-pub fn trigger_ai_score(app: &tauri::AppHandle, input: TriggerAiScoreInput) -> AppResult<AiScoreRun> {
+pub fn trigger_ai_score(
+    app: &tauri::AppHandle,
+    input: TriggerAiScoreInput,
+) -> AppResult<AiScoreRun> {
     let state = app.state::<AppState>();
     let run = {
         let conn = state.sqlite.lock().expect("sqlite lock");
@@ -67,7 +70,10 @@ pub fn list_ai_score_records(
         "#,
     );
     let mut values = Vec::new();
-    if let Some(trade_system_id) = filter.trade_system_id.filter(|value| !value.trim().is_empty()) {
+    if let Some(trade_system_id) = filter
+        .trade_system_id
+        .filter(|value| !value.trim().is_empty())
+    {
         sql.push_str(" and trade_system_id = ?");
         values.push(trade_system_id);
     }
@@ -148,7 +154,9 @@ fn create_run(
         Some(provider_id) => Some(get_provider(conn, provider_id)?.id),
         None => Some(
             get_active_provider(conn)?
-                .ok_or_else(|| AppError::new("provider_request_failed", "未配置活跃模型 Provider", true))?
+                .ok_or_else(|| {
+                    AppError::new("provider_request_failed", "未配置活跃模型 Provider", true)
+                })?
                 .id,
         ),
     };
@@ -381,7 +389,12 @@ async fn score_with_retry(
 
     match first {
         Ok(review) => Ok(review),
-        Err(error) if matches!(error.code.as_str(), "invalid_json" | "provider_request_failed") => {
+        Err(error)
+            if matches!(
+                error.code.as_str(),
+                "invalid_json" | "provider_request_failed"
+            ) =>
+        {
             review_service::score_stock(
                 &state,
                 record.stock_symbol.clone(),
@@ -616,7 +629,8 @@ fn ai_score_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiScoreRun
         total_count: row.get(6)?,
         completed_count: row.get(7)?,
         failed_count: row.get(8)?,
-        target_snapshot: serde_json::from_str(&raw_snapshot).unwrap_or_else(|_| Value::Array(vec![])),
+        target_snapshot: serde_json::from_str(&raw_snapshot)
+            .unwrap_or_else(|_| Value::Array(vec![])),
         created_at: row.get(10)?,
         updated_at: row.get(11)?,
         deleted_at: row.get(12)?,

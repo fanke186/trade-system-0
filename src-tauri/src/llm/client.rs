@@ -62,7 +62,7 @@ pub async fn call_model(
     let value: serde_json::Value =
         serde_json::from_str(&body).unwrap_or_else(|_| serde_json::json!({ "raw": body }));
     if !status.is_success() {
-        let (code, message) = provider_error(status.as_u16());
+        let (code, message) = provider_error(status.as_u16(), &value);
         return Err(AppError::with_detail(
             code,
             message,
@@ -86,7 +86,10 @@ pub async fn call_model(
 }
 
 fn merge_request_overrides(request: &mut Map<String, Value>, extra_json: &Value) {
-    let Some(overrides) = extra_json.get("requestOverrides").and_then(|node| node.as_object()) else {
+    let Some(overrides) = extra_json
+        .get("requestOverrides")
+        .and_then(|node| node.as_object())
+    else {
         return;
     };
     for (key, value) in overrides {
@@ -98,13 +101,34 @@ fn merge_request_overrides(request: &mut Map<String, Value>, extra_json: &Value)
     }
 }
 
-fn provider_error(status: u16) -> (&'static str, &'static str) {
+fn provider_error(status: u16, value: &Value) -> (&'static str, String) {
+    let detail_message = value
+        .pointer("/error/message")
+        .and_then(|node| node.as_str())
+        .or_else(|| value.get("message").and_then(|node| node.as_str()));
     match status {
-        401 => ("provider_auth_failed", "模型 Provider 认证失败，请检查 API Key"),
-        402 => ("provider_quota_insufficient", "模型 Provider 余额不足"),
-        429 => ("provider_rate_limited", "模型 Provider 请求速率达到上限"),
-        503 => ("provider_unavailable", "模型 Provider 暂时繁忙，请稍后重试"),
-        _ => ("provider_request_failed", "模型 Provider 返回错误"),
+        401 => (
+            "provider_auth_failed",
+            "模型 Provider 认证失败，请检查 API Key".to_string(),
+        ),
+        402 => (
+            "provider_quota_insufficient",
+            "模型 Provider 余额不足".to_string(),
+        ),
+        429 => (
+            "provider_rate_limited",
+            "模型 Provider 请求速率达到上限".to_string(),
+        ),
+        503 => (
+            "provider_unavailable",
+            "模型 Provider 暂时繁忙，请稍后重试".to_string(),
+        ),
+        _ => (
+            "provider_request_failed",
+            detail_message
+                .map(|message| format!("模型 Provider 返回错误：{}", message))
+                .unwrap_or_else(|| "模型 Provider 返回错误".to_string()),
+        ),
     }
 }
 

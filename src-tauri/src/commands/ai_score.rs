@@ -1,6 +1,8 @@
 use crate::app_state::AppState;
 use crate::error::AppResult;
-use crate::models::{AiScoreRecord, AiScoreRecordFilter, AiScoreRun, OkResult, TriggerAiScoreInput};
+use crate::models::{
+    AiScoreRecord, AiScoreRecordFilter, AiScoreRun, OkResult, TriggerAiScoreInput,
+};
 use crate::services::ai_score_service;
 use tauri::State;
 
