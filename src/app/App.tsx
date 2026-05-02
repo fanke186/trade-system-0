@@ -4,8 +4,7 @@ import { AppShell } from '../components/layout/AppShell'
 import { commands } from '../lib/commands'
 import type { PageId } from './routes'
 import { DailyReviewPage } from '../pages/DailyReviewPage'
-import { TradeSystemPage } from '../pages/TradeSystemPage'
-import { AgentPage } from '../pages/AgentPage'
+import { TradeSystemAgentsPage } from '../pages/TradeSystemAgentsPage'
 import { StockReviewPage } from '../pages/StockReviewPage'
 import { MyWatchlistPage } from '../pages/MyWatchlistPage'
 import { KlineDataPage } from '../pages/KlineDataPage'
@@ -41,10 +40,9 @@ export function App() {
         onStockCodeChange={setStockCode}
       />
     ),
-    'trade-system': (
-      <TradeSystemPage selectedVersionId={activeVersionId} onSelectVersion={setSelectedVersionId} />
+    'trade-system-agents': (
+      <TradeSystemAgentsPage selectedVersionId={activeVersionId} onSelectVersion={setSelectedVersionId} />
     ),
-    agent: <AgentPage selectedVersionId={activeVersionId} />,
     'stock-review': (
       <StockReviewPage
         selectedVersionId={activeVersionId}

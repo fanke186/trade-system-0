@@ -19,6 +19,9 @@ export type TradeSystemSummary = {
   activeVersionId?: string | null
   activeVersion?: number | null
   completenessStatus?: string | null
+  stockCount: number
+  systemPath?: string | null
+  personaPath?: string | null
   updatedAt: string
 }
 
@@ -39,6 +42,11 @@ export type TradeSystemDetail = {
   name: string
   description?: string | null
   activeVersionId?: string | null
+  activeVersion?: number | null
+  systemMd: string
+  systemPath?: string | null
+  personaMd: string
+  personaPath?: string | null
   createdAt: string
   updatedAt: string
   versions: TradeSystemVersion[]
@@ -60,6 +68,20 @@ export type TradeSystemDraft = {
   markdown: string
   gapQuestions: string[]
   sourceMaterialIds: string[]
+}
+
+export type TradeSystemRevisionInput = {
+  mode: 'create' | 'edit'
+  name: string
+  currentMarkdown: string
+  messages: ChatMessage[]
+}
+
+export type TradeSystemRevisionProposal = {
+  assistantMessage: string
+  markdown: string
+  diff: string
+  gapQuestions: string[]
 }
 
 export type ModelProvider = {
@@ -221,6 +243,25 @@ export type StockReview = {
   createdAt: string
 }
 
+export type TradeSystemStock = {
+  id: string
+  tradeSystemId: string
+  symbol: string
+  code: string
+  name: string
+  exchange?: string | null
+  industry?: string | null
+  latestScore?: number | null
+  previousReport?: string | null
+  previousReportPath?: string | null
+  latestReport?: string | null
+  latestReportPath?: string | null
+  latestScoreDate?: string | null
+  latestPrice?: number | null
+  changePct?: number | null
+  updatedAt?: string | null
+}
+
 export type DailyReviewRun = {
   watchlistId: string
   tradeSystemVersionId: string
@@ -235,6 +276,61 @@ export type DailyReviewItem = {
   score?: number | null
   rating?: string | null
   message?: string | null
+}
+
+export type TriggerAiScoreInput = {
+  triggerType: 'trade_system_agent' | 'single_stock' | 'watchlist'
+  tradeSystemVersionId: string
+  providerId?: string | null
+  stockSymbol?: string | null
+  watchlistId?: string | null
+}
+
+export type AiScoreRecordFilter = {
+  tradeSystemId?: string | null
+  status?: string | null
+  keyword?: string | null
+  limit?: number | null
+}
+
+export type AiScoreRun = {
+  id: string
+  triggerType: string
+  tradeSystemId: string
+  tradeSystemVersionId: string
+  providerId?: string | null
+  status: string
+  totalCount: number
+  completedCount: number
+  failedCount: number
+  targetSnapshot: unknown
+  createdAt: string
+  updatedAt: string
+  deletedAt?: string | null
+}
+
+export type AiScoreRecord = {
+  id: string
+  runId: string
+  stockSymbol: string
+  stockCode: string
+  stockName: string
+  tradeSystemId: string
+  tradeSystemVersionId: string
+  providerId?: string | null
+  triggerTime: string
+  scoreDate: string
+  status: string
+  score?: number | null
+  rating?: string | null
+  stockReviewId?: string | null
+  reportPath?: string | null
+  errorMessage?: string | null
+  startedAt?: string | null
+  completedAt?: string | null
+  createdAt: string
+  updatedAt: string
+  deletedAt?: string | null
 }
 
 export type ChartAnnotation = {

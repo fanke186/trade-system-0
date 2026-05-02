@@ -73,7 +73,15 @@ export function AppShell({
         </div>
       </header>
 
-      <main className={activePage === 'my-watchlist' ? 'flex-1 min-h-0' : 'overflow-auto p-4'}>{children}</main>
+      <main
+        className={
+          activePage === 'my-watchlist' || activePage === 'trade-system-agents'
+            ? 'min-h-0 flex-1'
+            : 'overflow-auto p-4'
+        }
+      >
+        {children}
+      </main>
     </div>
   )
 }

@@ -1,10 +1,8 @@
 import {
   Activity,
-  BarChart3,
   Bot,
   CalendarDays,
   Database,
-  FileText,
   Settings,
   Star
 } from 'lucide-react'
@@ -12,19 +10,16 @@ import {
 export type PageId =
   | 'my-watchlist'
   | 'daily-review'
-  | 'trade-system'
-  | 'agent'
+  | 'trade-system-agents'
   | 'stock-review'
   | 'kline-data'
   | 'settings'
 
 export const routes = [
   { id: 'my-watchlist', label: '我的自选', icon: Star },
-  { id: 'daily-review', label: '每日复盘', icon: CalendarDays },
-  { id: 'trade-system', label: '交易系统', icon: FileText },
-  { id: 'agent', label: 'Agent', icon: Bot },
+  { id: 'daily-review', label: 'AI 评分', icon: CalendarDays },
+  { id: 'trade-system-agents', label: '交易系统Agents', icon: Bot },
   { id: 'stock-review', label: '股票评分', icon: Activity },
   { id: 'kline-data', label: 'K线数据', icon: Database },
   { id: 'settings', label: '设置', icon: Settings }
-] as const satisfies Array<{ id: PageId; label: string; icon: typeof BarChart3 }>
-
+] as const
