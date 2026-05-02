@@ -5,11 +5,13 @@ use crate::models::{ModelProvider, ProviderTestResult, SaveModelProviderInput};
 use crate::services::common::{bool_to_int, new_id, now_iso};
 use base64::Engine;
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::Serialize;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::time::Instant;
 
-pub fn list_model_providers(conn: &Connection) -> AppResult<Vec<ModelProvider>> {
+pub fn list_model_providers(conn: &Connection, app_dir: &Path) -> AppResult<Vec<ModelProvider>> {
     let mut stmt = conn.prepare(
         r#"
         select id, name, provider_type, base_url, api_key_ref, model, temperature, max_tokens,
@@ -21,7 +23,7 @@ pub fn list_model_providers(conn: &Connection) -> AppResult<Vec<ModelProvider>> 
     let rows = stmt.query_map([], provider_from_row)?;
     let mut values = Vec::new();
     for row in rows {
-        values.push(redact_provider(row?));
+        values.push(redact_provider(row?, app_dir));
     }
     Ok(values)
 }
@@ -91,6 +93,7 @@ pub fn save_model_provider(
         provider_type: input.provider_type,
         base_url: input.base_url.trim_end_matches('/').to_string(),
         api_key_ref,
+        api_key_hint: None,
         model: input.model,
         temperature: input.temperature.unwrap_or(0.2),
         max_tokens: input.max_tokens.unwrap_or(4096),
@@ -141,10 +144,15 @@ pub fn save_model_provider(
         ],
     )?;
 
-    Ok(redact_provider(get_provider(conn, &id)?))
+    export_providers_yaml(conn, app_dir)?;
+    Ok(redact_provider(get_provider(conn, &id)?, app_dir))
 }
 
-pub fn set_active_model_provider(conn: &Connection, provider_id: &str) -> AppResult<ModelProvider> {
+pub fn set_active_model_provider(
+    conn: &Connection,
+    app_dir: &Path,
+    provider_id: &str,
+) -> AppResult<ModelProvider> {
     conn.execute("update model_providers set is_active = 0", [])?;
     let affected = conn.execute(
         "update model_providers set is_active = 1, enabled = 1, updated_at = ?1 where id = ?2",
@@ -153,7 +161,8 @@ pub fn set_active_model_provider(conn: &Connection, provider_id: &str) -> AppRes
     if affected == 0 {
         return Err(AppError::new("not_found", "模型 Provider 不存在", true));
     }
-    Ok(redact_provider(get_provider(conn, provider_id)?))
+    export_providers_yaml(conn, app_dir)?;
+    Ok(redact_provider(get_provider(conn, provider_id)?, app_dir))
 }
 
 pub async fn test_model_provider(
@@ -226,6 +235,7 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProvider>
         provider_type: row.get(2)?,
         base_url: row.get(3)?,
         api_key_ref: row.get(4)?,
+        api_key_hint: None,
         model: row.get(5)?,
         temperature: row.get(6)?,
         max_tokens: row.get(7)?,
@@ -237,13 +247,116 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProvider>
     })
 }
 
-fn redact_provider(mut provider: ModelProvider) -> ModelProvider {
-    provider.api_key_ref = if provider.api_key_ref.starts_with("local:") {
-        "local:***".to_string()
+fn redact_provider(mut provider: ModelProvider, app_dir: &Path) -> ModelProvider {
+    if let Some(provider_id) = provider.api_key_ref.strip_prefix("local:") {
+        provider.api_key_hint = Some(local_key_hint(app_dir, provider_id));
+        provider.api_key_ref = "local:***".to_string();
     } else {
-        provider.api_key_ref
-    };
+        provider.api_key_hint = provider
+            .api_key_ref
+            .strip_prefix("env:")
+            .map(|name| format!("环境变量 {}", name));
+    }
     provider
+}
+
+fn local_key_hint(app_dir: &Path, provider_id: &str) -> String {
+    match read_local_secret(app_dir, provider_id) {
+        Ok(secret) => {
+            let suffix = secret
+                .chars()
+                .rev()
+                .take(4)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<String>();
+            if suffix.is_empty() {
+                "已保存到本地 secrets".to_string()
+            } else {
+                format!("已保存 ****{}", suffix)
+            }
+        }
+        Err(_) => "已保存到本地 secrets".to_string(),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProvidersYaml {
+    version: u32,
+    updated_at: String,
+    providers: Vec<ProviderYamlEntry>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderYamlEntry {
+    id: String,
+    name: String,
+    provider_type: String,
+    base_url: String,
+    api_key_ref: String,
+    api_key_hint: Option<String>,
+    model: String,
+    temperature: f64,
+    max_tokens: i64,
+    enabled: bool,
+    is_active: bool,
+    extra_json: Value,
+    updated_at: String,
+}
+
+pub fn export_providers_yaml(conn: &Connection, app_dir: &Path) -> AppResult<()> {
+    let mut stmt = conn.prepare(
+        r#"
+        select id, name, provider_type, base_url, api_key_ref, model, temperature, max_tokens,
+               enabled, is_active, extra_json, created_at, updated_at
+          from model_providers
+         order by is_active desc, updated_at desc
+        "#,
+    )?;
+    let rows = stmt.query_map([], provider_from_row)?;
+    let mut providers = Vec::new();
+    for row in rows {
+        let provider = row?;
+        let api_key_hint = provider
+            .api_key_ref
+            .strip_prefix("local:")
+            .map(|provider_id| local_key_hint(app_dir, provider_id));
+        providers.push(ProviderYamlEntry {
+            id: provider.id,
+            name: provider.name,
+            provider_type: provider.provider_type,
+            base_url: provider.base_url,
+            api_key_ref: provider.api_key_ref,
+            api_key_hint,
+            model: provider.model,
+            temperature: provider.temperature,
+            max_tokens: provider.max_tokens,
+            enabled: provider.enabled,
+            is_active: provider.is_active,
+            extra_json: provider.extra_json,
+            updated_at: provider.updated_at,
+        });
+    }
+    let yaml = ProvidersYaml {
+        version: 1,
+        updated_at: now_iso(),
+        providers,
+    };
+    let config_dir = app_dir.join("config");
+    std::fs::create_dir_all(&config_dir)?;
+    let content = serde_yaml::to_string(&yaml).map_err(|error| {
+        AppError::with_detail(
+            "config_export_failed",
+            "Provider YAML 配置导出失败",
+            true,
+            serde_json::json!({ "error": error.to_string() }),
+        )
+    })?;
+    std::fs::write(config_dir.join("providers.yaml"), content)?;
+    Ok(())
 }
 
 fn write_local_secret(app_dir: &Path, provider_id: &str, api_key: &str) -> AppResult<()> {

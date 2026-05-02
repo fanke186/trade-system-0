@@ -507,13 +507,41 @@ pub async fn propose_revision(
 
 fn parse_revision_response(content: &str, current_markdown: &str) -> AppResult<serde_json::Value> {
     let trimmed = content.trim();
+    tracing::info!(
+        original_len = trimmed.len(),
+        preview = %preview_chars(trimmed, 300),
+        "解析模型修订响应"
+    );
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        tracing::info!("模型修订响应完整 JSON 解析成功");
         return Ok(value);
     }
-    if let Some(extracted) = extract_json_object(trimmed) {
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&extracted) {
+    let cleaned = strip_code_fence(trimmed);
+    if cleaned != trimmed {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(cleaned) {
+            tracing::info!("模型修订响应 code fence JSON 解析成功");
             return Ok(value);
         }
+    }
+    if let Some(extracted) = extract_json_object(cleaned) {
+        match serde_json::from_str::<serde_json::Value>(&extracted) {
+            Ok(value) => {
+                tracing::info!(
+                    extracted_len = extracted.len(),
+                    "模型修订响应提取 JSON 解析成功"
+                );
+                return Ok(value);
+            }
+            Err(error) => {
+                tracing::warn!(
+                    extracted_len = extracted.len(),
+                    error = %error,
+                    "模型修订响应提取 JSON 仍解析失败"
+                );
+            }
+        }
+    } else {
+        tracing::warn!("模型修订响应未找到完整 JSON 对象");
     }
     let fallback_message = if trimmed.starts_with('{') || trimmed.starts_with("```") {
         "模型已经返回内容，但修订 JSON 不完整或被截断。请把需求拆小一点再发，我会继续基于当前预览修订。"
@@ -530,11 +558,54 @@ fn parse_revision_response(content: &str, current_markdown: &str) -> AppResult<s
 
 fn extract_json_object(content: &str) -> Option<String> {
     let start = content.find('{')?;
-    let end = content.rfind('}')?;
-    if end <= start {
-        return None;
+    let mut depth = 0_i32;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (offset, ch) in content[start..].char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && in_string {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(content[start..start + offset + ch.len_utf8()].to_string());
+                }
+            }
+            _ => {}
+        }
     }
-    Some(content[start..=end].to_string())
+    None
+}
+
+fn strip_code_fence(content: &str) -> &str {
+    let trimmed = content.trim();
+    let Some(rest) = trimmed.strip_prefix("```") else {
+        return trimmed;
+    };
+    let rest = rest
+        .strip_prefix("json")
+        .or_else(|| rest.strip_prefix("JSON"))
+        .unwrap_or(rest)
+        .trim_start();
+    rest.strip_suffix("```").unwrap_or(rest).trim()
+}
+
+fn preview_chars(content: &str, limit: usize) -> String {
+    content.chars().take(limit).collect()
 }
 
 pub fn add_stocks(

@@ -7,7 +7,7 @@ use tauri::State;
 #[tauri::command]
 pub fn list_model_providers(state: State<'_, AppState>) -> AppResult<Vec<ModelProvider>> {
     let conn = state.sqlite.lock().expect("sqlite lock");
-    model_provider_service::list_model_providers(&conn)
+    model_provider_service::list_model_providers(&conn, &state.app_dir)
 }
 
 #[tauri::command]
@@ -25,7 +25,7 @@ pub fn set_active_model_provider(
     provider_id: String,
 ) -> AppResult<ModelProvider> {
     let conn = state.sqlite.lock().expect("sqlite lock");
-    model_provider_service::set_active_model_provider(&conn, &provider_id)
+    model_provider_service::set_active_model_provider(&conn, &state.app_dir, &provider_id)
 }
 
 #[tauri::command]

@@ -1,6 +1,6 @@
 use crate::db::{duckdb, migrations, sqlite};
 use crate::error::AppResult;
-use crate::services::watchlist_service;
+use crate::services::{model_provider_service, watchlist_service};
 use rusqlite::Connection as SqliteConnection;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -25,6 +25,7 @@ impl AppState {
             "logs",
             "backup",
             "cache/provider",
+            "config",
             "secrets",
         ] {
             std::fs::create_dir_all(app_dir.join(child))?;
@@ -39,6 +40,7 @@ impl AppState {
         let sqlite = sqlite::open(&sqlite_path)?;
         tracing::info!("SQLite 连接成功，正在执行迁移");
         sqlite::run_migrations(&sqlite)?;
+        model_provider_service::export_providers_yaml(&sqlite, &app_dir)?;
         tracing::info!("SQLite 迁移完成");
 
         tracing::info!("正在打开 DuckDB 数据库");

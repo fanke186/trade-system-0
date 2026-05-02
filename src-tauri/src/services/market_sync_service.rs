@@ -3,6 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::{FrequencyCoverage, KlineCoverage, KlineSyncResult};
 use crate::services::common::new_id;
 use std::path::PathBuf;
+use std::time::Instant;
 use tauri::Emitter;
 
 const DEFAULT_MARKET_DB: &str = "~/.data/duckdb/market/market.duckdb";
@@ -75,20 +76,40 @@ fn refresh_inner(
     attach_market(conn, market_path)?;
     emit_progress(app, "syncing", 10, "已连接 market-sync DuckDB");
 
-    sync_mapping(conn)?;
+    run_db_step(conn, "sync_mapping", || sync_mapping(conn))?;
     emit_progress(app, "syncing", 25, "已同步标的映射");
 
-    sync_securities(conn)?;
+    run_db_step(conn, "sync_securities", || sync_securities(conn))?;
     emit_progress(app, "syncing", 35, "已同步标的元数据");
 
-    let (_daily_new, is_first_sync) = sync_daily_bars_incremental(conn)?;
-    sync_trade_calendar(conn)?;
+    let scope = run_db_step(conn, "daily_sync_scope", || daily_sync_scope(conn))?;
+    if scope.is_empty() {
+        tracing::info!("外部 sync_state 未发现新增日 K，跳过 fact_kline 大表扫描");
+        emit_progress(app, "syncing", 90, "本地 K 线已是最新，跳过大表扫描");
+        run_db_step(conn, "update_mapping_watermarks", || {
+            update_mapping_watermarks(conn)
+        })?;
+        run_db_step(conn, "refresh_securities_latest", || {
+            refresh_securities_latest(conn)
+        })?;
+        emit_progress(app, "completed", 100, "数据已是最新，无需更新");
+        return count_kline_rows(conn);
+    }
+
+    let (_daily_new, is_first_sync) = run_db_step(conn, "sync_daily_bars_incremental", || {
+        sync_daily_bars_incremental(conn, &scope)
+    })?;
+    run_db_step(conn, "sync_trade_calendar", || sync_trade_calendar(conn))?;
     emit_progress(app, "syncing", 65, "已同步日 K");
 
     // Capture changed symbols BEFORE compute_derived_fields fills pre_close
-    let changed_symbols = changed_symbols_since(conn)?;
+    let changed_symbols = run_db_step(conn, "changed_symbols_since", || {
+        changed_symbols_since(conn)
+    })?;
 
-    compute_derived_fields(conn, is_first_sync)?;
+    run_db_step(conn, "compute_derived_fields", || {
+        compute_derived_fields(conn, is_first_sync)
+    })?;
     emit_progress(app, "syncing", 75, "已计算衍生字段");
 
     if changed_symbols.is_empty() {
@@ -99,20 +120,32 @@ fn refresh_inner(
         emit_progress(app, "syncing", 100, "数据已是最新，无需更新");
     } else {
         tracing::info!(symbol_count = changed_symbols.len(), "开始增量聚合");
-        aggregate_period_incremental(conn, "1w", "week", &changed_symbols)?;
-        aggregate_period_incremental(conn, "1M", "month", &changed_symbols)?;
-        aggregate_period_incremental(conn, "1Q", "quarter", &changed_symbols)?;
-        aggregate_period_incremental(conn, "1Y", "year", &changed_symbols)?;
+        run_db_step(conn, "aggregate_1w", || {
+            aggregate_period_incremental(conn, "1w", "week", &changed_symbols)
+        })?;
+        run_db_step(conn, "aggregate_1M", || {
+            aggregate_period_incremental(conn, "1M", "month", &changed_symbols)
+        })?;
+        run_db_step(conn, "aggregate_1Q", || {
+            aggregate_period_incremental(conn, "1Q", "quarter", &changed_symbols)
+        })?;
+        run_db_step(conn, "aggregate_1Y", || {
+            aggregate_period_incremental(conn, "1Y", "year", &changed_symbols)
+        })?;
         emit_progress(app, "syncing", 90, "已增量聚合周月季年 K");
 
-        update_mapping_watermarks(conn)?;
+        run_db_step(conn, "update_mapping_watermarks", || {
+            update_mapping_watermarks(conn)
+        })?;
         emit_progress(app, "syncing", 96, "已更新同步水位");
 
-        refresh_securities_latest(conn)?;
+        run_db_step(conn, "refresh_securities_latest", || {
+            refresh_securities_latest(conn)
+        })?;
         emit_progress(app, "syncing", 98, "已刷新标的最新价");
     }
 
-    let rows_written = count_kline_rows(conn)?;
+    let rows_written = run_db_step(conn, "count_kline_rows", || count_kline_rows(conn))?;
     emit_progress(app, "completed", 100, "同步完成");
 
     Ok(rows_written)
@@ -194,11 +227,9 @@ fn sync_mapping(conn: &DuckConnection) -> AppResult<()> {
           coalesce(n.name, n.trade_symbol),
           coalesce(nullif(n.type, ''), 'stock'),
           current_timestamp,
-          ss.last_kline_date,
-          coalesce(ss.kline_count, 0)
+          null,
+          0
         from normalized n
-        left join market_db.sync_state ss
-          on ss.symbol = n.trade_symbol and ss.adjust = 'none'
         where n.app_symbol is not null
           and n.code is not null
           and n.exchange in ('SH', 'SZ', 'BJ')
@@ -278,7 +309,30 @@ fn sync_securities(conn: &DuckConnection) -> AppResult<()> {
 /// Incremental: only insert rows where trade_date > last_kline_date from mapping.
 /// On first sync (kline_mapping is empty or has no watermarks), falls back to full import.
 /// Returns (rows_inserted, is_first_sync).
-fn sync_daily_bars_incremental(conn: &DuckConnection) -> AppResult<(i64, bool)> {
+fn daily_sync_scope(conn: &DuckConnection) -> AppResult<Vec<String>> {
+    let mut stmt = conn.prepare(
+        r#"
+        select distinct m.trade_symbol
+          from kline_mapping m
+          join market_db.sync_state ss
+            on ss.symbol = m.trade_symbol
+           and ss.adjust in ('none', 'forward')
+         where ss.last_kline_date is not null
+           and ss.last_kline_date > coalesce(m.last_kline_date, date '1970-01-01')
+        "#,
+    )?;
+    let symbols = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .filter_map(Result::ok)
+        .collect::<Vec<_>>();
+    tracing::info!(symbol_count = symbols.len(), "日 K 水位检查完成");
+    Ok(symbols)
+}
+
+fn sync_daily_bars_incremental(
+    conn: &DuckConnection,
+    changed_trade_symbols: &[String],
+) -> AppResult<(i64, bool)> {
     // Check if this is a first sync (no mapping watermarks)
     let has_watermarks: bool = conn
         .query_row(
@@ -288,7 +342,18 @@ fn sync_daily_bars_incremental(conn: &DuckConnection) -> AppResult<(i64, bool)> 
         )
         .unwrap_or(false);
 
-    let rows = conn.execute(
+    if changed_trade_symbols.is_empty() {
+        tracing::info!(has_watermarks, "无新增外部水位，跳过日 K 增量同步");
+        return Ok((0, false));
+    }
+
+    let placeholders = changed_trade_symbols
+        .iter()
+        .enumerate()
+        .map(|(index, _)| format!("?{}", index + 1))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
         r#"
         insert or replace into kline_bars
           (symbol, period, adj_mode, trade_date, open, high, low, close, pre_close,
@@ -315,6 +380,7 @@ fn sync_daily_bars_incremental(conn: &DuckConnection) -> AppResult<(i64, bool)> 
             and f.high is not null
             and f.low is not null
             and f.close is not null
+            and f.symbol in ({})
             and f.trade_date > coalesce(m.last_kline_date, '1970-01-01')
         ),
         deduped as (
@@ -350,8 +416,13 @@ fn sync_daily_bars_incremental(conn: &DuckConnection) -> AppResult<(i64, bool)> 
           current_timestamp
         from deduped
         "#,
-        [],
-    )?;
+        placeholders
+    );
+    let params = changed_trade_symbols
+        .iter()
+        .map(|symbol| symbol as &dyn duckdb::ToSql)
+        .collect::<Vec<_>>();
+    let rows = conn.execute(&sql, &params[..])?;
 
     tracing::info!(rows, has_watermarks, "日 K 增量同步完成");
     Ok((rows as i64, !has_watermarks))
@@ -691,4 +762,69 @@ fn emit_progress(app: &tauri::AppHandle, status: &str, percent: i32, message: &s
             "message": message,
         }),
     );
+}
+
+fn run_db_step<T>(
+    conn: &DuckConnection,
+    step: &str,
+    f: impl FnOnce() -> AppResult<T>,
+) -> AppResult<T> {
+    log_memory(conn, step, "start");
+    let started = Instant::now();
+    let result = f();
+    match &result {
+        Ok(_) => tracing::info!(
+            step,
+            elapsed_ms = started.elapsed().as_millis(),
+            "market-sync 步骤完成"
+        ),
+        Err(error) => tracing::warn!(
+            step,
+            elapsed_ms = started.elapsed().as_millis(),
+            code = %error.code,
+            message = %error.message,
+            "market-sync 步骤失败"
+        ),
+    }
+    log_memory(conn, step, "end");
+    result
+}
+
+fn log_memory(conn: &DuckConnection, step: &str, phase: &str) {
+    #[cfg(target_os = "macos")]
+    if let Some(rss_mb) = process_rss_mb() {
+        tracing::info!(step, phase, rss_mb, "进程内存快照");
+    }
+    if let Some((duckdb_memory_mb, duckdb_temp_mb)) = duckdb_memory_mb(conn) {
+        tracing::info!(
+            step,
+            phase,
+            duckdb_memory_mb,
+            duckdb_temp_mb,
+            "DuckDB 内存快照"
+        );
+    }
+}
+
+fn duckdb_memory_mb(conn: &DuckConnection) -> Option<(i64, i64)> {
+    conn.query_row(
+        "select
+           cast(coalesce(sum(memory_usage_bytes), 0) / 1024 / 1024 as bigint),
+           cast(coalesce(sum(temporary_storage_bytes), 0) / 1024 / 1024 as bigint)
+         from duckdb_memory()",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .ok()
+}
+
+#[cfg(target_os = "macos")]
+fn process_rss_mb() -> Option<u64> {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+        .output()
+        .ok()?;
+    let text = String::from_utf8(output.stdout).ok()?;
+    let rss_kb = text.trim().parse::<u64>().ok()?;
+    Some(rss_kb / 1024)
 }

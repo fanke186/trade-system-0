@@ -112,6 +112,7 @@ pub struct ModelProvider {
     pub provider_type: String,
     pub base_url: String,
     pub api_key_ref: String,
+    pub api_key_hint: Option<String>,
     pub model: String,
     pub temperature: f64,
     pub max_tokens: i64,
