@@ -35,13 +35,14 @@ pub fn run() {
             commands::trade_system::check_trade_system_completeness,
             commands::trade_system::save_trade_system_version,
             commands::trade_system::export_trade_system_version,
+            commands::trade_system::add_trade_system_stocks,
             commands::provider::list_model_providers,
             commands::provider::save_model_provider,
             commands::provider::set_active_model_provider,
             commands::provider::test_model_provider,
             commands::agent::create_agent_from_trade_system,
             commands::agent::run_agent_chat,
-            commands::kline::sync_kline,
+            commands::kline::refresh_from_market,
             commands::kline::get_bars,
             commands::kline::get_data_coverage,
             commands::kline::list_securities,
@@ -64,8 +65,6 @@ pub fn run() {
             commands::annotation::delete_chart_annotation,
             commands::data_ops::search_securities,
             commands::data_ops::get_data_health,
-            commands::data_ops::sync_securities_metadata,
-            commands::data_ops::import_csv_data,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run trade-system-0");
