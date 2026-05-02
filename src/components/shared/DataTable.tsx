@@ -4,7 +4,7 @@ type Column =
   | string
   | {
       key: string
-      label: string
+      label: ReactNode
       onClick?: () => void
       active?: boolean
       dir?: 'asc' | 'desc'

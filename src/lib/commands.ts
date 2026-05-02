@@ -62,6 +62,8 @@ export const commands = {
       'export_trade_system_version',
       { versionId, targetPath }
     ),
+  addTradeSystemStocks: (tradeSystemId: string, stockCodes: string[]) =>
+    call<OkResult>('add_trade_system_stocks', { tradeSystemId, stockCodes }),
 
   listModelProviders: () => call<ModelProvider[]>('list_model_providers'),
   saveModelProvider: (provider: SaveModelProviderInput) =>
@@ -79,8 +81,8 @@ export const commands = {
   runAgentChat: (agentId: string, messages: ChatMessage[]) =>
     call<AgentChatResult>('run_agent_chat', { agentId, messages }),
 
-  syncKline: (stockCode: string, mode: 'full' | 'incremental', scope?: 'all' | 'incomplete' | 'symbols') =>
-    call<KlineSyncResult>('sync_kline', { stockCode, mode, scope }),
+  refreshFromMarket: () =>
+    call<KlineSyncResult>('refresh_from_market'),
   getBars: (
     stockCode: string,
     frequency: '1d' | '1w' | '1M' | '1Q' | '1Y',
@@ -164,10 +166,4 @@ export const commands = {
 
   getDataHealth: () =>
     call<DataHealth>('get_data_health'),
-
-  syncSecuritiesMetadata: () =>
-    call<number>('sync_securities_metadata'),
-
-  importCsvData: (dirPath: string) =>
-    call<KlineSyncResult>('import_csv_data', { dirPath }),
 }

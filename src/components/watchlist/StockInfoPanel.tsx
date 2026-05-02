@@ -29,11 +29,12 @@ export function StockInfoPanel({
   })
 
   const syncMutation = useMutation({
-    mutationFn: () => commands.syncKline(stockCode, 'incremental'),
+    mutationFn: () => commands.refreshFromMarket(),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['stock-meta', stockCode] })
       void queryClient.invalidateQueries({ queryKey: ['coverage', stockCode] })
       void queryClient.invalidateQueries({ queryKey: ['bars'] })
+      void queryClient.invalidateQueries({ queryKey: ['data-health'] })
     }
   })
 
@@ -56,7 +57,7 @@ export function StockInfoPanel({
               onClick={() => syncMutation.mutate()}
               disabled={syncMutation.isPending}
             >
-              {syncMutation.isPending ? '同步中...' : '更新数据'}
+              {syncMutation.isPending ? '刷新中...' : '刷新本地数据'}
             </button>
           )}
         </div>

@@ -1,8 +1,8 @@
 use crate::app_state::AppState;
 use crate::error::AppResult;
 use crate::models::{
-    CompletenessReport, ExportResult, MaterialRecord, TradeSystemDetail, TradeSystemDraft,
-    TradeSystemSummary, TradeSystemVersion,
+    CompletenessReport, ExportResult, MaterialRecord, OkResult, TradeSystemDetail,
+    TradeSystemDraft, TradeSystemSummary, TradeSystemVersion,
 };
 use crate::services::{material_service, trade_system_service};
 use tauri::State;
@@ -67,4 +67,14 @@ pub fn export_trade_system_version(
 ) -> AppResult<ExportResult> {
     let conn = state.sqlite.lock().expect("sqlite lock");
     trade_system_service::export_version(&conn, &version_id, &target_path)
+}
+
+#[tauri::command]
+pub fn add_trade_system_stocks(
+    state: State<'_, AppState>,
+    trade_system_id: String,
+    stock_codes: Vec<String>,
+) -> AppResult<OkResult> {
+    let conn = state.sqlite.lock().expect("sqlite lock");
+    trade_system_service::add_stocks(&conn, &trade_system_id, stock_codes)
 }

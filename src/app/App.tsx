@@ -1,4 +1,4 @@
-import { type ReactElement, useEffect, useMemo, useState } from 'react'
+import { type ReactElement, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AppShell } from '../components/layout/AppShell'
 import { commands } from '../lib/commands'
@@ -24,10 +24,6 @@ export function App() {
     queryKey: ['model-providers'],
     queryFn: commands.listModelProviders
   })
-  useEffect(() => {
-    commands.syncSecuritiesMetadata().catch(() => {})
-  }, [])
-
   const tradeSystems = tradeSystemsQuery.data ?? []
   const activeProvider = providersQuery.data?.find(provider => provider.isActive)
 

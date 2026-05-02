@@ -1,7 +1,7 @@
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    CompletenessReport, ExportResult, TradeSystemDetail, TradeSystemDraft, TradeSystemSummary,
-    TradeSystemVersion,
+    CompletenessReport, ExportResult, OkResult, TradeSystemDetail, TradeSystemDraft,
+    TradeSystemSummary, TradeSystemVersion,
 };
 use crate::services::common::{new_id, now_iso, sha256_hex};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -261,6 +261,33 @@ pub fn export_version(
         target_path: target_path.to_string(),
         bytes_written: version.markdown.as_bytes().len(),
     })
+}
+
+pub fn add_stocks(
+    conn: &Connection,
+    trade_system_id: &str,
+    stock_codes: Vec<String>,
+) -> AppResult<OkResult> {
+    let exists: Option<String> = conn
+        .query_row(
+            "select id from trade_systems where id = ?1",
+            params![trade_system_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if exists.is_none() {
+        return Err(AppError::new("not_found", "交易系统不存在", true));
+    }
+
+    let now = now_iso();
+    for stock_code in stock_codes {
+        conn.execute(
+            "insert or ignore into trade_system_stocks (trade_system_id, stock_code, created_at)
+             values (?1, ?2, ?3)",
+            params![trade_system_id, stock_code, now],
+        )?;
+    }
+    Ok(OkResult { ok: true })
 }
 
 pub fn generate_draft_from_materials(
