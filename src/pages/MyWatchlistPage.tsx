@@ -31,7 +31,7 @@ export function MyWatchlistPage({
   onStockCodeChange: (code: string) => void
 }) {
   const [frequency, setFrequency] = useState<'1d' | '1w' | '1M' | '1Q' | '1Y'>('1d')
-  const [adjMode, setAdjMode] = useState<'pre' | 'post' | 'none'>('pre')
+  const [adjMode, setAdjMode] = useState<'pre' | 'none'>('pre')
   const [subChartType, setSubChartType] = useState<'volume' | 'amount'>(() =>
     window.localStorage.getItem('qsgg.subChartType') === 'amount' ? 'amount' : 'volume'
   )

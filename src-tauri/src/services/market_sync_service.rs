@@ -25,7 +25,7 @@ pub fn refresh_from_market(
     let result = refresh_inner(app, conn, &market_path);
     match result {
         Ok(rows_written) => {
-            let _ = detach_market(conn);
+            cleanup_detach_market(conn);
             conn.execute(
                 "update kline_sync_runs
                     set status = 'ok', finished_at = current_timestamp, rows_written = ?1, source = 'market-sync'
@@ -45,7 +45,7 @@ pub fn refresh_from_market(
         }
         Err(err) => {
             let _ = conn.execute_batch("rollback");
-            let _ = detach_market(conn);
+            cleanup_detach_market(conn);
             let _ = conn.execute(
                 "update kline_sync_runs
                     set status = 'failed', finished_at = current_timestamp, error = ?1, source = 'market-sync'
@@ -75,69 +75,133 @@ fn refresh_inner(
     attach_market(conn, market_path)?;
     emit_progress(app, "syncing", 10, "已连接 market-sync DuckDB");
 
-    conn.execute_batch("begin transaction")?;
-
     sync_mapping(conn)?;
     emit_progress(app, "syncing", 25, "已同步标的映射");
 
     sync_securities(conn)?;
     emit_progress(app, "syncing", 35, "已同步标的元数据");
 
-    conn.execute("delete from kline_bars", [])?;
-    let _daily_rows = sync_daily_bars(conn)?;
+    let (_daily_new, is_first_sync) = sync_daily_bars_incremental(conn)?;
     sync_trade_calendar(conn)?;
     emit_progress(app, "syncing", 65, "已同步日 K 并计算衍生字段");
 
-    aggregate_period(conn, "1w", "week")?;
-    aggregate_period(conn, "1M", "month")?;
-    aggregate_period(conn, "1Q", "quarter")?;
-    aggregate_period(conn, "1Y", "year")?;
-    emit_progress(app, "syncing", 85, "已聚合周月季年 K");
+    compute_derived_fields(conn, is_first_sync)?;
+    emit_progress(app, "syncing", 75, "已计算衍生字段");
+
+    let changed_symbols = changed_symbols_since(conn)?;
+    aggregate_period_incremental(conn, "1w", "week", &changed_symbols)?;
+    aggregate_period_incremental(conn, "1M", "month", &changed_symbols)?;
+    aggregate_period_incremental(conn, "1Q", "quarter", &changed_symbols)?;
+    aggregate_period_incremental(conn, "1Y", "year", &changed_symbols)?;
+    emit_progress(app, "syncing", 90, "已增量聚合周月季年 K");
 
     update_mapping_watermarks(conn)?;
-    emit_progress(app, "syncing", 95, "已更新同步水位");
+    emit_progress(app, "syncing", 98, "已更新同步水位");
 
     let rows_written = count_kline_rows(conn)?;
-    conn.execute_batch("commit")?;
-    emit_progress(app, "syncing", 98, "正在收尾");
+    emit_progress(app, "completed", 100, "同步完成");
 
     Ok(rows_written)
 }
 
 fn attach_market(conn: &DuckConnection, market_path: &PathBuf) -> AppResult<()> {
-    let _ = detach_market(conn);
+    detach_market_if_attached(conn)?;
     let path = escape_sql_literal(&market_path.to_string_lossy());
     conn.execute_batch(&format!("attach '{path}' as market_db (read_only)"))?;
     Ok(())
 }
 
-fn detach_market(conn: &DuckConnection) -> AppResult<()> {
-    conn.execute_batch("detach market_db")?;
-    Ok(())
+fn cleanup_detach_market(conn: &DuckConnection) {
+    if let Err(error) = detach_market_if_attached(conn) {
+        tracing::warn!(
+            code = %error.code,
+            message = %error.message,
+            "market-sync DuckDB detach 清理失败"
+        );
+    }
+}
+
+fn detach_market_if_attached(conn: &DuckConnection) -> AppResult<()> {
+    match conn.execute_batch("detach market_db") {
+        Ok(()) => Ok(()),
+        Err(error) if is_market_db_not_attached(&error) => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn is_market_db_not_attached(error: &duckdb::Error) -> bool {
+    let message = error.to_string().to_lowercase();
+    message.contains("database not found") && message.contains("market_db")
 }
 
 fn sync_mapping(conn: &DuckConnection) -> AppResult<()> {
-    conn.execute("delete from kline_mapping", [])?;
+    // Insert new symbols only; preserve existing watermarks for already-mapped symbols.
     conn.execute(
         r#"
-        insert into kline_mapping
+        insert or ignore into kline_mapping
           (trade_symbol, app_symbol, code, exchange, name, stock_type,
            last_sync_at, last_kline_date, kline_count)
+        with normalized as (
+          select
+            d.symbol as trade_symbol,
+            case
+              when regexp_matches(split_part(d.symbol, '.', 1), '^[0-9]{6}$')
+               and upper(split_part(d.symbol, '.', 2)) in ('SH', 'SZ', 'BJ')
+                then split_part(d.symbol, '.', 1) || '.' || upper(split_part(d.symbol, '.', 2))
+              when regexp_matches(split_part(d.symbol, '.', 2), '^[0-9]{6}$')
+               and upper(split_part(d.symbol, '.', 1)) in ('SH', 'SZ', 'BJ')
+                then split_part(d.symbol, '.', 2) || '.' || upper(split_part(d.symbol, '.', 1))
+              else null
+            end as app_symbol,
+            case
+              when regexp_matches(split_part(d.symbol, '.', 1), '^[0-9]{6}$')
+                then split_part(d.symbol, '.', 1)
+              when regexp_matches(split_part(d.symbol, '.', 2), '^[0-9]{6}$')
+                then split_part(d.symbol, '.', 2)
+              else null
+            end as code,
+            case
+              when regexp_matches(split_part(d.symbol, '.', 1), '^[0-9]{6}$')
+                then upper(split_part(d.symbol, '.', 2))
+              when regexp_matches(split_part(d.symbol, '.', 2), '^[0-9]{6}$')
+                then upper(split_part(d.symbol, '.', 1))
+              else null
+            end as exchange,
+            d.name,
+            d.type,
+            d.is_active
+          from market_db.dim_instrument d
+        )
         select
-          d.symbol,
-          split_part(d.symbol, '.', 2) || '.' || upper(coalesce(nullif(d.exchange, ''), split_part(d.symbol, '.', 1))),
-          split_part(d.symbol, '.', 2),
-          upper(coalesce(nullif(d.exchange, ''), split_part(d.symbol, '.', 1))),
-          coalesce(d.name, d.symbol),
-          coalesce(nullif(d.type, ''), 'stock'),
+          n.trade_symbol,
+          n.app_symbol,
+          n.code,
+          n.exchange,
+          coalesce(n.name, n.trade_symbol),
+          coalesce(nullif(n.type, ''), 'stock'),
           current_timestamp,
           ss.last_kline_date,
           coalesce(ss.kline_count, 0)
-        from market_db.dim_instrument d
+        from normalized n
         left join market_db.sync_state ss
-          on ss.symbol = d.symbol and ss.adjust = 'none'
-        where split_part(d.symbol, '.', 2) <> ''
-          and coalesce(d.is_active, true)
+          on ss.symbol = n.trade_symbol and ss.adjust = 'none'
+        where n.app_symbol is not null
+          and n.code is not null
+          and n.exchange in ('SH', 'SZ', 'BJ')
+          and coalesce(n.is_active, true)
+        "#,
+        [],
+    )?;
+
+    // Refresh name/type for existing mappings without touching watermarks
+    conn.execute(
+        r#"
+        update kline_mapping
+        set
+          name = coalesce(d.name, kline_mapping.name),
+          stock_type = coalesce(nullif(d.type, ''), kline_mapping.stock_type, 'stock')
+        from market_db.dim_instrument d
+        where d.symbol = kline_mapping.trade_symbol
         "#,
         [],
     )?;
@@ -197,10 +261,22 @@ fn sync_securities(conn: &DuckConnection) -> AppResult<()> {
     Ok(())
 }
 
-fn sync_daily_bars(conn: &DuckConnection) -> AppResult<i64> {
+/// Incremental: only insert rows where trade_date > last_kline_date from mapping.
+/// On first sync (kline_mapping is empty or has no watermarks), falls back to full import.
+/// Returns (rows_inserted, is_first_sync).
+fn sync_daily_bars_incremental(conn: &DuckConnection) -> AppResult<(i64, bool)> {
+    // Check if this is a first sync (no mapping watermarks)
+    let has_watermarks: bool = conn
+        .query_row(
+            "select count(*) > 0 from kline_mapping where last_kline_date is not null",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+
     let rows = conn.execute(
         r#"
-        insert into kline_bars
+        insert or replace into kline_bars
           (symbol, period, adj_mode, trade_date, open, high, low, close, pre_close,
            volume, amount, change, change_pct, amplitude, turnover_rate, source, updated_at)
         with source_rows as (
@@ -215,7 +291,8 @@ fn sync_daily_bars(conn: &DuckConnection) -> AppResult<i64> {
             f.close,
             cast(coalesce(f.volume, 0) as double) as volume,
             coalesce(f.amount, 0) as amount,
-            f.turnover as turnover_rate
+            f.turnover as turnover_rate,
+            f.updated_at as source_updated_at
           from market_db.fact_kline f
           join kline_mapping m on m.trade_symbol = f.symbol
           where f.period = '1d'
@@ -224,15 +301,20 @@ fn sync_daily_bars(conn: &DuckConnection) -> AppResult<i64> {
             and f.high is not null
             and f.low is not null
             and f.close is not null
+            and f.trade_date > coalesce(m.last_kline_date, '1970-01-01')
         ),
-        calc as (
-          select
-            *,
-            lag(close) over (
-              partition by symbol, adj_mode
-              order by trade_date
-            ) as pre_close
-          from source_rows
+        deduped as (
+          select * exclude (rn)
+          from (
+            select
+              *,
+              row_number() over (
+                partition by symbol, period, adj_mode, trade_date
+                order by source_updated_at desc nulls last
+              ) as rn
+            from source_rows
+          )
+          where rn = 1
         )
         select
           symbol,
@@ -243,20 +325,84 @@ fn sync_daily_bars(conn: &DuckConnection) -> AppResult<i64> {
           high,
           low,
           close,
-          pre_close,
+          null as pre_close,
           volume,
           amount,
-          case when pre_close is null then null else close - pre_close end,
-          case when pre_close is null or pre_close = 0 then null else (close / pre_close - 1) * 100 end,
-          case when pre_close is null or pre_close = 0 then null else (high - low) / pre_close * 100 end,
+          null as change,
+          null as change_pct,
+          null as amplitude,
           turnover_rate,
           'market-sync',
           current_timestamp
-        from calc
+        from deduped
         "#,
         [],
     )?;
-    Ok(rows as i64)
+
+    tracing::info!(rows, has_watermarks, "日 K 增量同步完成");
+    Ok((rows as i64, !has_watermarks))
+}
+
+/// Compute derived fields (pre_close, change, change_pct, amplitude) only for rows
+/// that haven't been computed yet (pre_close is null). On first sync this processes
+/// everything; on incremental sync only the new rows.
+fn compute_derived_fields(conn: &DuckConnection, _is_first_sync: bool) -> AppResult<()> {
+    // The CTE uses a window function over ALL rows for each symbol to compute
+    // pre_close correctly — the new row's pre_close might need the previous row
+    // which could be an existing row. So we only need lag() to compute the
+    // pre_close for rows that are currently null.
+    conn.execute(
+        r#"
+        with computed as (
+          select
+            symbol, period, adj_mode, trade_date,
+            lag(close) over (
+              partition by symbol, period, adj_mode
+              order by trade_date
+            ) as calc_pre_close
+          from kline_bars
+          where source = 'market-sync'
+        )
+        update kline_bars
+        set
+          pre_close = c.calc_pre_close,
+          change = close - c.calc_pre_close,
+          change_pct = case
+            when c.calc_pre_close is null or c.calc_pre_close = 0 then null
+            else (close / c.calc_pre_close - 1) * 100
+          end,
+          amplitude = case
+            when c.calc_pre_close is null or c.calc_pre_close = 0 then null
+            else (high - low) / c.calc_pre_close * 100
+          end,
+          updated_at = current_timestamp
+        from computed c
+        where kline_bars.symbol = c.symbol
+          and kline_bars.period = c.period
+          and kline_bars.adj_mode = c.adj_mode
+          and kline_bars.trade_date = c.trade_date
+          and kline_bars.source = 'market-sync'
+          and kline_bars.pre_close is null
+        "#,
+        [],
+    )?;
+
+    tracing::info!("衍生字段计算完成");
+    Ok(())
+}
+
+/// Get symbols that have new (un-derived) rows since last sync — used to scope
+/// aggregate recalculation to only affected symbols.
+fn changed_symbols_since(conn: &DuckConnection) -> AppResult<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "select distinct symbol from kline_bars
+          where source = 'market-sync' and pre_close is null and period = '1d'",
+    )?;
+    let symbols: Vec<String> = stmt
+        .query_map([], |row| row.get(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(symbols)
 }
 
 fn sync_trade_calendar(conn: &DuckConnection) -> AppResult<()> {
@@ -269,18 +415,51 @@ fn sync_trade_calendar(conn: &DuckConnection) -> AppResult<()> {
     Ok(())
 }
 
-fn aggregate_period(conn: &DuckConnection, period: &str, date_part: &str) -> AppResult<i64> {
+/// Re-aggregate period bars only for changed symbols. On first sync (empty
+/// changed_symbols list), falls back to aggregating all symbols.
+fn aggregate_period_incremental(
+    conn: &DuckConnection,
+    period: &str,
+    date_part: &str,
+    changed_symbols: &[String],
+) -> AppResult<i64> {
+    // Delete existing aggregate rows for changed symbols before re-inserting
+    if !changed_symbols.is_empty() {
+        let placeholders: Vec<String> = changed_symbols.iter().enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect();
+        let sql = format!(
+            "delete from kline_bars where period = '{}' and symbol in ({})",
+            period,
+            placeholders.join(", ")
+        );
+        let params: Vec<&dyn duckdb::ToSql> = changed_symbols
+            .iter()
+            .map(|s| s as &dyn duckdb::ToSql)
+            .collect();
+        conn.execute(&sql, &params[..])?;
+    }
+
+    let symbol_filter = if changed_symbols.is_empty() {
+        String::new()
+    } else {
+        let placeholders: Vec<String> = changed_symbols.iter().enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect();
+        format!("and symbol in ({})", placeholders.join(", "))
+    };
+
     let sql = format!(
         r#"
-        insert into kline_bars
+        insert or replace into kline_bars
           (symbol, period, adj_mode, trade_date, open, high, low, close, pre_close,
            volume, amount, change, change_pct, amplitude, turnover_rate, source, updated_at)
         with agg as (
           select
             symbol,
-            '{period}' as period,
+            '{}' as period,
             adj_mode,
-            date_trunc('{date_part}', trade_date)::date as trade_date,
+            date_trunc('{}', trade_date)::date as trade_date,
             first(open order by trade_date asc) as open,
             max(high) as high,
             min(low) as low,
@@ -290,7 +469,8 @@ fn aggregate_period(conn: &DuckConnection, period: &str, date_part: &str) -> App
             avg(turnover_rate) as turnover_rate
           from kline_bars
           where period = '1d'
-          group by symbol, adj_mode, date_trunc('{date_part}', trade_date)
+            {}
+          group by symbol, adj_mode, date_trunc('{}', trade_date)
         ),
         calc as (
           select
@@ -320,9 +500,20 @@ fn aggregate_period(conn: &DuckConnection, period: &str, date_part: &str) -> App
           'market-sync-agg',
           current_timestamp
         from calc
-        "#
+        "#,
+        period, date_part, symbol_filter, date_part
     );
-    let rows = conn.execute(&sql, [])?;
+
+    let rows = if changed_symbols.is_empty() {
+        conn.execute(&sql, [])?
+    } else {
+        let params: Vec<&dyn duckdb::ToSql> = changed_symbols
+            .iter()
+            .map(|s| s as &dyn duckdb::ToSql)
+            .collect();
+        conn.execute(&sql, &params[..])?
+    };
+
     Ok(rows as i64)
 }
 

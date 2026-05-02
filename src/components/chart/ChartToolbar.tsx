@@ -2,7 +2,7 @@ import { Settings } from 'lucide-react'
 import { cn } from '../../lib/cn'
 
 type Frequency = '1d' | '1w' | '1M' | '1Q' | '1Y'
-type AdjMode = 'pre' | 'post' | 'none'
+type AdjMode = 'pre' | 'none'
 type DrawingTool = 'horizontal_line' | 'ray' | null
 
 export function ChartToolbar({
@@ -29,7 +29,7 @@ export function ChartToolbar({
   onDrawingToolChange: (t: DrawingTool) => void
 }) {
   const freqLabels: Record<Frequency, string> = { '1d': '日K', '1w': '周K', '1M': '月K', '1Q': '季K', '1Y': '年K' }
-  const adjLabels: Record<AdjMode, string> = { pre: '前复权', post: '后复权', none: '除权' }
+  const adjLabels: Record<AdjMode, string> = { pre: '前复权', none: '除权' }
 
   return (
     <div className="flex h-10 items-center gap-4 bg-panel/65 px-3 shadow-[0_1px_0_rgba(255,255,255,0.03)]">

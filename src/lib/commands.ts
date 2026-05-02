@@ -2,6 +2,9 @@ import { invoke } from '@tauri-apps/api/core'
 import type {
   Agent,
   AgentChatResult,
+  AiScoreRecord,
+  AiScoreRecordFilter,
+  AiScoreRun,
   ChartAnnotation,
   ChatMessage,
   CompletenessReport,
@@ -21,7 +24,11 @@ import type {
   StockReview,
   TradeSystemDetail,
   TradeSystemDraft,
+  TradeSystemRevisionInput,
+  TradeSystemRevisionProposal,
+  TradeSystemStock,
   TradeSystemSummary,
+  TriggerAiScoreInput,
   TradeSystemVersion,
   Watchlist,
   WatchlistItem
@@ -43,6 +50,8 @@ export const commands = {
       materialIds,
       prompt
     }),
+  proposeTradeSystemRevision: (input: TradeSystemRevisionInput) =>
+    call<TradeSystemRevisionProposal>('propose_trade_system_revision', { input }),
   checkTradeSystemCompleteness: (markdown: string) =>
     call<CompletenessReport>('check_trade_system_completeness', { markdown }),
   saveTradeSystemVersion: (
@@ -62,8 +71,14 @@ export const commands = {
       'export_trade_system_version',
       { versionId, targetPath }
     ),
-  addTradeSystemStocks: (tradeSystemId: string, stockCodes: string[]) =>
-    call<OkResult>('add_trade_system_stocks', { tradeSystemId, stockCodes }),
+  addTradeSystemStocks: (tradeSystemId: string, symbols: string[]) =>
+    call<OkResult>('add_trade_system_stocks', { tradeSystemId, symbols }),
+  listTradeSystemStocks: (tradeSystemId: string) =>
+    call<TradeSystemStock[]>('list_trade_system_stocks', { tradeSystemId }),
+  removeTradeSystemStock: (tradeSystemId: string, symbol: string) =>
+    call<OkResult>('remove_trade_system_stock', { tradeSystemId, symbol }),
+  deleteTradeSystem: (tradeSystemId: string) =>
+    call<OkResult>('delete_trade_system', { tradeSystemId }),
 
   listModelProviders: () => call<ModelProvider[]>('list_model_providers'),
   saveModelProvider: (provider: SaveModelProviderInput) =>
@@ -89,7 +104,7 @@ export const commands = {
     startDate?: string,
     endDate?: string,
     limit?: number,
-    adj?: 'pre' | 'post' | 'none'
+    adj?: 'pre' | 'none'
   ) =>
     call<KlineBar[]>('get_bars', {
       stockCode, frequency, startDate, endDate, limit, adj
@@ -115,6 +130,12 @@ export const commands = {
       watchlistId,
       tradeSystemVersionId
     }),
+  triggerAiScore: (input: TriggerAiScoreInput) =>
+    call<AiScoreRun>('trigger_ai_score', { input }),
+  listAiScoreRecords: (filter?: AiScoreRecordFilter) =>
+    call<AiScoreRecord[]>('list_ai_score_records', { filter }),
+  deleteAiScoreRecord: (recordId: string) =>
+    call<OkResult>('delete_ai_score_record', { recordId }),
 
   listWatchlists: () => call<Watchlist[]>('list_watchlists'),
   saveWatchlist: (name: string, id?: string) => call<Watchlist>('save_watchlist', { id, name }),
