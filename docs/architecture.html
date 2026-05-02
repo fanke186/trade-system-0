@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>trade-system-0 Architecture</title>
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+mermaid.initialize({
+  startOnLoad: true,
+  theme: 'base',
+  themeVariables: {
+    primaryColor: '#1a1a1a',
+    primaryTextColor: '#e0e0e0',
+    primaryBorderColor: '#4d90fe',
+    lineColor: '#555',
+    secondaryColor: '#121212',
+    tertiaryColor: '#0d0d0d',
+  },
+  flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' },
+  sequence: { useMaxWidth: true, showSequenceNumbers: false }
+});
+</script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0d0d0d; color: #e0e0e0; font-family: 'DM Sans', sans-serif; padding: 40px; }
+  h1 { font-family: 'DM Mono', monospace; color: #4d90fe; margin-bottom: 8px; font-size: 20px; }
+  .sub { color: #888; margin-bottom: 48px; font-family: 'DM Mono', monospace; font-size: 12px; }
+  h2 { font-family: 'DM Mono', monospace; font-size: 15px; color: #f0b93b; margin: 48px 0 24px; padding-top: 32px; border-top: 1px solid #2a2a2a; }
+  .mermaid { margin: 20px 0; }
+</style>
+</head>
+<body>
+<h1>trade-system-0</h1>
+<div class="sub">System Module Architecture</div>
+
+<h2>模块架构</h2>
+<div class="mermaid">
+graph TB
+    subgraph Frontend["Frontend — React + TypeScript + Vite"]
+        direction TB
+        subgraph Pages["Pages"]
+            WL[MyWatchlistPage<br/>三栏布局首页]
+            KD[KlineDataPage<br/>数据集市管理]
+            SR[StockReviewPage<br/>个股评分]
+            DR[DailyReviewPage<br/>每日复盘]
+            AP[AgentPage<br/>AI Agent 对话]
+            TS[TradeSystemPage<br/>交易系统编辑器]
+            SP[SettingsPage<br/>模型/供应商配置]
+        end
+        subgraph Components["Components"]
+            direction LR
+            CH[chart/<br/>KLineChart 工具栏 设置面板]
+            CW[watchlist/<br/>侧栏 分组排序 右键菜单]
+            CL[layout/<br/>窗口标题栏]
+            CS[shared/<br/>Badge Button Input Panel DataTable]
+        end
+    end
+
+    subgraph IPC["Tauri IPC Bridge"]
+        INVOKE[@tauri-apps/api invoke]
+    end
+
+    subgraph Commands["Commands Layer — src-tauri/src/commands/"]
+        CMD_KLINE[kline.rs]
+        CMD_DATA[data_ops.rs]
+        CMD_META[stock_meta.rs]
+        CMD_WL[watchlist.rs + watchlist_ops.rs]
+        CMD_REVIEW[review.rs]
+        CMD_AGENT[agent.rs]
+        CMD_PROV[provider.rs]
+        CMD_TSYS[trade_system.rs]
+        CMD_ANNO[annotation.rs]
+    end
+
+    subgraph Services["Services Layer — src-tauri/src/services/"]
+        SVC_SYNC[kline_sync_service<br/>Python 脚本编排]
+        SVC_IMPORT[kline_import_service<br/>Parquet → DuckDB]
+        SVC_QUERY[kline_query_service<br/>K线只读查询]
+        SVC_WL[watchlist_service]
+        SVC_REVIEW[review_service]
+        SVC_AGENT[agent_service]
+        SVC_TSYS[trade_system_service]
+        SVC_PROV[model_provider_service]
+        SVC_ANNO[annotation_service]
+    end
+
+    subgraph LLM["LLM Layer — src-tauri/src/llm/"]
+        LLM_CLIENT[client.rs<br/>OpenAI-compatible]
+        LLM_PROMPT[prompts.rs]
+        LLM_GUARD[json_guard.rs]
+    end
+
+    subgraph DB["Database Layer — src-tauri/src/db/"]
+        DUCK[duckdb.rs<br/>kline_bars securities<br/>trade_calendar kline_sync_runs]
+        SQL[sqlite.rs<br/>应用状态/配置]
+        MIG[migrations.rs<br/>DDL 迁移]
+    end
+
+    subgraph Python["Python Sync — scripts/sync_kline.py"]
+        PY_MAIN[main<br/>编排调度]
+        PY_DISC[discover_instruments]
+        PY_SYNC[sync_klines<br/>5期×3复权 限流重试]
+        PY_WRITE[write_bars → Parquet]
+    end
+
+    subgraph External["External APIs"]
+        TF[TickFlow API<br/>free-api.tickflow.org]
+        EM[eastmoney API]
+        LLM_EXT[LLM Providers<br/>OpenAI 兼容]
+    end
+
+    Pages --> INVOKE
+    Components --> Pages
+    INVOKE --> Commands
+    Commands --> Services
+    Services --> LLM
+    Services --> DB
+    SVC_SYNC -- spawns --> PY_MAIN
+    PY_DISC --> TF
+    PY_SYNC --> TF
+    LLM_CLIENT --> LLM_EXT
+</div>
+
+<h2>K线同步时序</h2>
+<div class="mermaid">
+sequenceDiagram
+    participant U as 用户
+    participant FE as React
+    participant CMD as Tauri Command
+    participant SVC as kline_sync_service
+    participant PY as Python
+    participant TF as TickFlow
+    participant DUCK as DuckDB
+
+    U->>FE: 点击"一键补齐"
+    FE->>CMD: invoke sync_kline('', 'incremental', 'incomplete')
+    CMD->>SVC: run_sync_script()
+    SVC->>PY: spawn python3 sync_kline.py
+    PY->>TF: TickFlow.klines.batch(symbols, period, count=40)
+    TF-->>PY: K线 JSON
+    PY->>PY: enrich → Parquet (.data/klines/current/)
+    PY-->>SVC: stdout JSONL 进度事件
+    CMD->>SVC: import_and_finalize()
+    SVC->>DUCK: INSERT securities FROM Parquet
+    SVC->>DUCK: INSERT kline_bars FROM Parquet
+    SVC->>DUCK: INSERT trade_calendar
+    SVC-->>CMD: KlineSyncResult
+    CMD-->>FE: invalidate queries
+</div>
+
+<h2>评分链路</h2>
+<div class="mermaid">
+sequenceDiagram
+    participant U as 用户
+    participant FE as React
+    participant CMD as Tauri Command
+    participant SVC as review_service
+    participant DUCK as DuckDB
+    participant SQL as SQLite
+    participant LLM as LLM
+
+    U->>FE: 点击"评分"
+    FE->>CMD: invoke score_stock(symbol)
+    CMD->>SVC: score_stock()
+    SVC->>DUCK: get_bars (coverage check)
+    SVC->>DUCK: get_bars 1d/1w/1M/1Q/1Y summaries
+    SVC->>LLM: Chat Completions (评分 prompt)
+    LLM-->>SVC: 评分 JSON
+    SVC->>SQL: INSERT stock_reviews
+    SVC-->>CMD: StockReview
+    CMD-->>FE: 评分结果
+</div>
+</body>
+</html>
