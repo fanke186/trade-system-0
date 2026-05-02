@@ -10,10 +10,16 @@ export function CrosshairTooltip({
   if (!bar) return null
 
   const prevClose = bar.preClose ?? bar.open
-  const closeVsPrev = bar.close - prevClose
-  const isUp = closeVsPrev >= 0
-  const textColor = isUp ? 'text-[#0f9f6e]' : 'text-[#dc2626]'
-  const changeColor = (bar.change ?? 0) >= 0 ? 'text-[#0f9f6e]' : 'text-[#dc2626]'
+  const valueColor = (value: number) => {
+    if (value > prevClose) return 'text-[#dc2626]'
+    if (value < prevClose) return 'text-[#0f9f6e]'
+    return 'text-muted-foreground'
+  }
+  const changeColor = (bar.change ?? 0) > 0
+    ? 'text-[#dc2626]'
+    : (bar.change ?? 0) < 0
+      ? 'text-[#0f9f6e]'
+      : 'text-muted-foreground'
 
   const positionClass = position === 'top-right' ? 'right-2 top-2' : 'left-2 top-2'
 
@@ -27,16 +33,16 @@ export function CrosshairTooltip({
         <span className="text-right text-foreground">{bar.date}</span>
 
         <span className="text-muted-foreground">开盘</span>
-        <span className={`text-right ${textColor}`}>{bar.open.toFixed(2)}</span>
+        <span className={`text-right ${valueColor(bar.open)}`}>{bar.open.toFixed(2)}</span>
 
         <span className="text-muted-foreground">最高</span>
-        <span className={`text-right ${textColor}`}>{bar.high.toFixed(2)}</span>
+        <span className={`text-right ${valueColor(bar.high)}`}>{bar.high.toFixed(2)}</span>
 
         <span className="text-muted-foreground">最低</span>
-        <span className={`text-right ${textColor}`}>{bar.low.toFixed(2)}</span>
+        <span className={`text-right ${valueColor(bar.low)}`}>{bar.low.toFixed(2)}</span>
 
         <span className="text-muted-foreground">收盘</span>
-        <span className={`text-right ${textColor}`}>{bar.close.toFixed(2)}</span>
+        <span className={`text-right ${valueColor(bar.close)}`}>{bar.close.toFixed(2)}</span>
 
         <span className="text-muted-foreground">涨幅</span>
         <span className={`text-right ${changeColor}`}>

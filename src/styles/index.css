@@ -13,9 +13,9 @@
   --border: 0 0% 16%;
   --input: 0 0% 16%;
   --ring: 217 91% 64%;
-  --success: 217 91% 64%;
+  --success: 158 83% 34%;
   --warning: 41 90% 56%;
-  --danger: 16 100% 60%;
+  --danger: 0 72% 51%;
   --info: 196 91% 75%;
   --extra: 254 79% 82%;
 }
@@ -28,12 +28,22 @@ body {
   margin: 0;
   min-width: 1180px;
   min-height: 760px;
+  overflow: hidden;
   background: hsl(var(--background));
   color: hsl(var(--foreground));
   font-family:
     'DM Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     sans-serif;
   letter-spacing: 0;
+}
+
+*:not(textarea)::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+*:not(textarea) {
+  scrollbar-width: none;
 }
 
 code,

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Search, RefreshCw } from 'lucide-react'
 import { listen } from '@tauri-apps/api/event'
 import { cn } from '../lib/cn'
@@ -22,6 +22,13 @@ function DataHealthBanner() {
     queryKey: ['data-health'],
     queryFn: () => commands.getDataHealth(),
     refetchInterval: 30000
+  })
+  const syncMutation = useMutation({
+    mutationFn: () => commands.syncKline('', 'incremental', 'incomplete'),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['data-health'] })
+      void queryClient.invalidateQueries({ queryKey: ['securities'] })
+    }
   })
 
   const moodMap: Record<string, { emoji: string; label: string }> = {
@@ -56,12 +63,11 @@ function DataHealthBanner() {
           </div>
           <Button
             variant="secondary"
-            icon={<RefreshCw className="h-4 w-4" />}
-            onClick={async () => {
-              await queryClient.invalidateQueries({ queryKey: ['data-health'] })
-            }}
+            icon={<RefreshCw className={cn('h-4 w-4', syncMutation.isPending && 'animate-spin')} />}
+            disabled={syncMutation.isPending}
+            onClick={() => syncMutation.mutate()}
           >
-            {'一键补齐'}
+            {syncMutation.isPending ? '补齐中' : '一键补齐'}
           </Button>
         </>
       ) : (
@@ -89,7 +95,7 @@ function SecurityAutocomplete({
     setInput(r.code)
     setSelectedName(r.name)
     setOpen(false)
-    onSelect(r.code)
+    onSelect(r.symbol)
   }
 
   useEffect(() => {
@@ -161,6 +167,10 @@ function SecurityAutocomplete({
 /* ------------------------------------------------------------------ */
 
 type SortField = 'code' | 'name'
+  | 'changePct'
+  | 'latestPrice'
+  | 'industry'
+  | 'dataStatus'
 type SortDir = 'asc' | 'desc'
 
 function SecuritiesTable({ keyword }: { keyword?: string }) {
@@ -175,9 +185,12 @@ function SecuritiesTable({ keyword }: { keyword?: string }) {
   const sorted = useMemo(() => {
     const data = secQuery.data ?? []
     return [...data].sort((a, b) => {
-      const aVal = String(a[sortField])
-      const bVal = String(b[sortField])
-      const cmp = aVal.localeCompare(bVal, 'zh-CN')
+      const aVal = a[sortField]
+      const bVal = b[sortField]
+      const cmp =
+        typeof aVal === 'number' || typeof bVal === 'number'
+          ? Number(aVal ?? Number.NEGATIVE_INFINITY) - Number(bVal ?? Number.NEGATIVE_INFINITY)
+          : String(aVal ?? '').localeCompare(String(bVal ?? ''), 'zh-CN')
       return sortDir === 'asc' ? cmp : -cmp
     })
   }, [secQuery.data, sortField, sortDir])
@@ -199,20 +212,24 @@ function SecuritiesTable({ keyword }: { keyword?: string }) {
   const columns = [
     { key: 'code', label: '代码', sortable: true },
     { key: 'name', label: '名称', sortable: true },
-    { key: 'price', label: '现价', sortable: false },
-    { key: 'change', label: '涨幅', sortable: false },
-    { key: 'industry', label: '所属行业', sortable: false },
-    { key: 'status', label: '数据状态', sortable: false }
+    { key: 'changePct', label: '涨幅', sortable: true },
+    { key: 'latestPrice', label: '现价', sortable: true },
+    { key: 'industry', label: '所属行业', sortable: true },
+    { key: 'dataStatus', label: '数据状态', sortable: true }
   ]
 
   return (
     <DataTable
-      columns={columns.map(c =>
-        c.sortable ? `${c.label}${sortArrow(c.key as SortField)}` : c.label
-      )}
+      columns={columns.map(c => ({
+        key: c.key,
+        label: c.label,
+        active: sortField === c.key,
+        dir: sortDir,
+        onClick: c.sortable ? () => handleSort(c.key as SortField) : undefined,
+      }))}
     >
       {sorted.map(security => (
-        <SecuritiesRow key={security.symbolId} security={security} />
+        <SecuritiesRow key={security.symbol} security={security} />
       ))}
     </DataTable>
   )
@@ -229,7 +246,7 @@ function SecuritiesRow({ security }: { security: Security }) {
       status: string
       percent: number
     }>('kline-sync-progress', event => {
-      if (event.payload.stockCode === security.code) {
+      if (event.payload.stockCode === security.symbol) {
         setProgress(event.payload.percent)
         if (event.payload.status === 'completed') {
           setSyncing(false)
@@ -246,14 +263,20 @@ function SecuritiesRow({ security }: { security: Security }) {
     <tr className="cursor-pointer hover:bg-muted/50">
       <Td className="font-mono">{security.code}</Td>
       <Td>{security.name}</Td>
-      <Td className="font-mono text-muted-foreground">-</Td>
-      <Td className="font-mono text-muted-foreground">-</Td>
-      <Td className="text-muted-foreground">{security.board ?? '-'}</Td>
+      <Td className={cn('font-mono', (security.changePct ?? 0) > 0 && 'text-danger', (security.changePct ?? 0) < 0 && 'text-[#0f9f6e]')}>
+        {security.changePct == null ? '-' : `${security.changePct > 0 ? '+' : ''}${security.changePct.toFixed(2)}%`}
+      </Td>
+      <Td className={cn('font-mono', (security.changePct ?? 0) > 0 && 'text-danger', (security.changePct ?? 0) < 0 && 'text-[#0f9f6e]')}>
+        {security.latestPrice == null ? '-' : security.latestPrice.toFixed(2)}
+      </Td>
+      <Td className="text-muted-foreground">{security.industry ?? security.board ?? '-'}</Td>
       <Td>
         {syncing ? (
           <Badge tone="warning">{'同步中'} {progress}%</Badge>
-        ) : security.status === 'active' ? (
+        ) : security.dataStatus === 'complete' ? (
           <Badge tone="success">{'齐全'}</Badge>
+        ) : security.dataStatus === 'stale' ? (
+          <Badge tone="warning">{'待更新'}</Badge>
         ) : (
           <Badge tone="danger">{'缺失'}</Badge>
         )}
@@ -277,7 +300,7 @@ function SyncRow({ stockCode }: { stockCode: string }) {
       status: string
       percent: number
     }>('kline-sync-progress', event => {
-      if (event.payload.stockCode === stockCode) {
+        if (event.payload.stockCode === stockCode || (!stockCode && event.payload.status)) {
         setProgress(event.payload.percent)
         if (event.payload.status === 'completed') {
           setSyncing(false)

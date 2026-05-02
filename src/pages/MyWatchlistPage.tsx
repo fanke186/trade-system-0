@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toErrorMessage } from '../lib/format'
 import { WatchlistSidebar } from '../components/watchlist/WatchlistSidebar'
@@ -32,14 +32,31 @@ export function MyWatchlistPage({
 }) {
   const [frequency, setFrequency] = useState<'1d' | '1w' | '1M' | '1Q' | '1Y'>('1d')
   const [adjMode, setAdjMode] = useState<'pre' | 'post' | 'none'>('pre')
-  const [subChartType, setSubChartType] = useState<'volume' | 'amount'>('volume')
-  const [settings, setSettings] = useState<ChartSettings>(DEFAULT_SETTINGS)
+  const [subChartType, setSubChartType] = useState<'volume' | 'amount'>(() =>
+    window.localStorage.getItem('qsgg.subChartType') === 'amount' ? 'amount' : 'volume'
+  )
+  const [settings, setSettings] = useState<ChartSettings>(() => {
+    try {
+      const stored = window.localStorage.getItem('qsgg.chartSettings')
+      return stored ? { ...DEFAULT_SETTINGS, ...JSON.parse(stored) } : DEFAULT_SETTINGS
+    } catch {
+      return DEFAULT_SETTINGS
+    }
+  })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [drawingTool, setDrawingTool] = useState<'horizontal_line' | 'ray' | null>(null)
   const [crosshairBar, setCrosshairBar] = useState<KlineBar | null>(null)
   const [crosshairPos, setCrosshairPos] = useState<'top-left' | 'top-right'>('top-right')
 
   const queryClient = useQueryClient()
+  useEffect(() => {
+    window.localStorage.setItem('qsgg.chartSettings', JSON.stringify(settings))
+  }, [settings])
+
+  useEffect(() => {
+    window.localStorage.setItem('qsgg.subChartType', subChartType)
+  }, [subChartType])
+
   const invalidateAnnotations = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['annotations', stockCode, selectedVersionId] })
   }, [queryClient, selectedVersionId, stockCode])
@@ -103,9 +120,9 @@ export function MyWatchlistPage({
 
       {/* CENTER — flex-1 chart area */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <ChartToolbar
-          stockName={meta.data?.name || stockCode}
-          stockCode={stockCode}
+          <ChartToolbar
+            stockName={meta.data?.name || stockCode}
+          stockCode={meta.data?.code ?? stockCode}
           frequency={frequency}
           onFrequencyChange={setFrequency}
           adjMode={adjMode}

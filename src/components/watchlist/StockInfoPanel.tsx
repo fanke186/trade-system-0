@@ -23,18 +23,23 @@ export function StockInfoPanel({
     queryFn: () => commands.getStockReviews(stockCode, selectedVersionId),
     enabled: Boolean(stockCode)
   })
+  const tradeSystems = useQuery({
+    queryKey: ['trade-systems'],
+    queryFn: commands.listTradeSystems
+  })
 
   const syncMutation = useMutation({
     mutationFn: () => commands.syncKline(stockCode, 'incremental'),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['stock-meta', stockCode] })
       void queryClient.invalidateQueries({ queryKey: ['coverage', stockCode] })
+      void queryClient.invalidateQueries({ queryKey: ['bars'] })
     }
   })
 
   const m = meta.data
   const priceColor = !m?.change ? 'text-foreground'
-    : m.change > 0 ? 'text-[#0f9f6e]' : 'text-[#dc2626]'
+    : m.change > 0 ? 'text-[#dc2626]' : 'text-[#0f9f6e]'
   const changeStr = m?.change != null
     ? `${m.change > 0 ? '+' : ''}${m.change.toFixed(2)} (${m.changePct != null ? (m.changePct > 0 ? '+' : '') + m.changePct.toFixed(2) + '%' : ''})`
     : ''
@@ -44,19 +49,19 @@ export function StockInfoPanel({
       {/* Stock metadata card */}
       <div className="p-3 shadow-[0_1px_0_rgba(255,255,255,0.03)]">
         <div className="flex items-center gap-1.5 mb-1">
-          <span className="text-base font-semibold">{m?.name || stockCode}</span>
+          <span className="min-w-0 flex-1 truncate text-2xl font-semibold leading-7">{m?.name || stockCode}</span>
           {m?.stale && (
             <button
               className="px-1.5 py-0.5 bg-ring/20 text-ring font-mono text-[9px] hover:bg-ring hover:text-panel transition-all"
               onClick={() => syncMutation.mutate()}
               disabled={syncMutation.isPending}
             >
-              {syncMutation.isPending ? '同步中...' : '更新'}
+              {syncMutation.isPending ? '同步中...' : '更新数据'}
             </button>
           )}
         </div>
         <div className="text-[10px] font-mono text-muted-foreground mb-2">
-          {stockCode}{m?.exchange ? ` · ${m.exchange}` : ''}
+          {m?.code ?? stockCode}{m?.exchange ? ` · ${m.exchange}` : ''}
         </div>
         {m?.latestPrice != null ? (
           <>
@@ -82,7 +87,9 @@ export function StockInfoPanel({
           reviews.data!.map(review => (
             <div key={review.id} className="mb-1.5 bg-muted/35 p-2 text-xs">
               <div className="flex items-center justify-between mb-1">
-                <span className="font-medium text-[11px]">交易系统</span>
+                <span className="min-w-0 truncate font-medium text-[11px]">
+                  {tradeSystems.data?.find(system => system.id === review.tradeSystemId)?.name ?? '交易系统'}
+                </span>
                 <Badge tone={review.rating === 'focus' ? 'success' : review.rating === 'reject' ? 'danger' : 'warning'}>
                   {review.rating}
                 </Badge>

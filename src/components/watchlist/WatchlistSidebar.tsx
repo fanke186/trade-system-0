@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useMutation, useQuery, useQueries, useQueryClient } from '@tanstack/react-query'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { commands } from '../../lib/commands'
 import type { StockMeta, WatchlistItem } from '../../lib/types'
@@ -26,6 +27,7 @@ export function WatchlistSidebar({
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [copySubOpen, setCopySubOpen] = useState(false)
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
   const menuRef = useRef<HTMLDivElement>(null)
   const subRef = useRef<HTMLDivElement>(null)
 
@@ -110,10 +112,33 @@ export function WatchlistSidebar({
     onSuccess: invalidate,
   })
 
-  const moveMutation = useMutation({
+  const copyMutation = useMutation({
     mutationFn: ({ itemId, targetWatchlistId }: { itemId: string; targetWatchlistId: string }) =>
-      commands.moveWatchlistItem(itemId, targetWatchlistId),
+      commands.copyWatchlistItem(itemId, targetWatchlistId),
     onSuccess: invalidate,
+  })
+
+  const createGroupMutation = useMutation({
+    mutationFn: (name: string) => commands.createWatchlistGroup(name),
+    onSuccess: created => {
+      invalidate()
+      if (typeof created === 'object' && created && 'id' in created) {
+        setSelectedWatchlistId(String(created.id))
+      }
+    },
+  })
+
+  const renameGroupMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => commands.renameWatchlistGroup(id, name),
+    onSuccess: invalidate,
+  })
+
+  const deleteGroupMutation = useMutation({
+    mutationFn: (id: string) => commands.deleteWatchlistGroup(id),
+    onSuccess: () => {
+      setSelectedWatchlistId(undefined)
+      invalidate()
+    },
   })
 
   // Sort toggle
@@ -134,10 +159,13 @@ export function WatchlistSidebar({
     (e: React.MouseEvent, item: WatchlistItem) => {
       e.preventDefault()
       e.stopPropagation()
+      if (!selectedItemIds.has(item.id)) {
+        setSelectedItemIds(new Set([item.id]))
+      }
       setContextMenu({ x: e.clientX, y: e.clientY, item })
       setCopySubOpen(false)
     },
-    [],
+    [selectedItemIds],
   )
 
   const closeContextMenu = useCallback(() => {
@@ -174,17 +202,44 @@ export function WatchlistSidebar({
   // Group selector change
   const handleGroupChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedWatchlistId(e.target.value)
+    setSelectedItemIds(new Set())
     closeContextMenu()
   }, [closeContextMenu])
+
+  const contextItems = useMemo(() => {
+    if (!contextMenu) return []
+    const ids = selectedItemIds.has(contextMenu.item.id) ? selectedItemIds : new Set([contextMenu.item.id])
+    return items.filter(item => ids.has(item.id))
+  }, [contextMenu, items, selectedItemIds])
+
+  const handleCreateGroup = useCallback(() => {
+    const name = window.prompt('新分组名称')?.trim()
+    if (name) createGroupMutation.mutate(name)
+  }, [createGroupMutation])
+
+  const handleRenameGroup = useCallback(() => {
+    if (!currentWatchlist) return
+    const name = window.prompt('分组名称', currentWatchlist.name)?.trim()
+    if (name && name !== currentWatchlist.name) {
+      renameGroupMutation.mutate({ id: currentWatchlist.id, name })
+    }
+  }, [currentWatchlist, renameGroupMutation])
+
+  const handleDeleteGroup = useCallback(() => {
+    if (!currentWatchlist || currentWatchlist.name === '我的自选') return
+    if (window.confirm(`删除分组「${currentWatchlist.name}」？`)) {
+      deleteGroupMutation.mutate(currentWatchlist.id)
+    }
+  }, [currentWatchlist, deleteGroupMutation])
 
   return (
     <div className="flex w-40 flex-col bg-panel/75">
       {/* Group selector */}
-      <div className="px-2 py-2">
+      <div className="flex gap-1 px-2 py-2">
         <select
           value={currentWatchlist?.id ?? ''}
           onChange={handleGroupChange}
-          className="w-full border-0 bg-muted/45 px-2 py-1.5 text-xs text-foreground font-mono outline-none transition focus:bg-muted"
+          className="min-w-0 flex-1 border-0 bg-muted/45 px-2 py-1.5 text-xs text-foreground font-mono outline-none transition focus:bg-muted"
         >
           {watchlists.map(w => (
             <option key={w.id} value={w.id}>
@@ -192,6 +247,15 @@ export function WatchlistSidebar({
             </option>
           ))}
         </select>
+        <IconButton title="新建分组" onClick={handleCreateGroup}>
+          <Plus className="h-3.5 w-3.5" />
+        </IconButton>
+        <IconButton title="重命名分组" onClick={handleRenameGroup}>
+          <Pencil className="h-3.5 w-3.5" />
+        </IconButton>
+        <IconButton title="删除分组" onClick={handleDeleteGroup} disabled={currentWatchlist?.name === '我的自选'}>
+          <Trash2 className="h-3.5 w-3.5" />
+        </IconButton>
       </div>
 
       {/* Column headers */}
@@ -235,12 +299,25 @@ export function WatchlistSidebar({
             <button
               key={item.id}
               type="button"
-              onClick={() => onStockCodeChange(item.stockCode)}
+              onClick={event => {
+                setSelectedItemIds(prev => {
+                  if (event.metaKey || event.ctrlKey) {
+                    const next = new Set(prev)
+                    if (next.has(item.id)) next.delete(item.id)
+                    else next.add(item.id)
+                    return next
+                  }
+                  return new Set([item.id])
+                })
+                onStockCodeChange(item.stockCode)
+              }}
               onContextMenu={e => handleContextMenu(e, item)}
               className={cn(
                 'mx-1 mb-0.5 flex w-[calc(100%-0.5rem)] border-l-2 px-2 py-1.5 text-left transition',
                 isActive
                   ? 'border-l-ring bg-ring/10'
+                  : selectedItemIds.has(item.id)
+                    ? 'border-l-ring/50 bg-muted/35'
                   : 'border-l-transparent hover:bg-muted/40',
               )}
             >
@@ -250,7 +327,7 @@ export function WatchlistSidebar({
                   {meta?.name || item.stockCode}
                 </span>
                 <span className="truncate text-[11px] text-muted-foreground font-mono leading-4">
-                  {item.stockCode}
+                  {meta?.code ?? item.stockCode}
                 </span>
               </div>
               {/* Right: changePct + price */}
@@ -260,8 +337,8 @@ export function WatchlistSidebar({
                     <span
                       className={cn(
                         'text-sm leading-5 font-mono',
-                        isUp && 'text-success',
-                        isDown && 'text-danger',
+                        isUp && 'text-danger',
+                        isDown && 'text-success',
                       )}
                     >
                       {changePct >= 0 ? '+' : ''}
@@ -309,9 +386,11 @@ export function WatchlistSidebar({
               tone="danger"
               onClick={() => {
                 if (currentWatchlist) {
-                  removeMutation.mutate({
-                    watchlistId: currentWatchlist.id,
-                    stockCode: contextMenu.item.stockCode,
+                  contextItems.forEach(item => {
+                    removeMutation.mutate({
+                      watchlistId: currentWatchlist.id,
+                      stockCode: item.stockCode,
+                    })
                   })
                 }
                 closeContextMenu()
@@ -337,9 +416,11 @@ export function WatchlistSidebar({
                         key={w.id}
                         label={w.name}
                         onClick={() => {
-                          moveMutation.mutate({
-                            itemId: contextMenu.item.id,
-                            targetWatchlistId: w.id,
+                          contextItems.forEach(item => {
+                            copyMutation.mutate({
+                              itemId: item.id,
+                              targetWatchlistId: w.id,
+                            })
                           })
                           closeContextMenu()
                         }}
@@ -381,6 +462,30 @@ function ContextMenuItem({
       )}
     >
       {label}
+    </button>
+  )
+}
+
+function IconButton({
+  title,
+  disabled,
+  onClick,
+  children,
+}: {
+  title: string
+  disabled?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      disabled={disabled}
+      onClick={onClick}
+      className="flex h-7 w-7 shrink-0 items-center justify-center bg-muted/45 text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+    >
+      {children}
     </button>
   )
 }

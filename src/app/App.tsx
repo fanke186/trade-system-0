@@ -13,7 +13,7 @@ import { SettingsPage } from '../pages/SettingsPage'
 
 export function App() {
   const [activePage, setActivePage] = useState<PageId>('my-watchlist')
-  const [stockCode, setStockCode] = useState('002261')
+  const [stockCode, setStockCode] = useState('002261.SZ')
   const [selectedVersionId, setSelectedVersionId] = useState<string | undefined>()
 
   const tradeSystemsQuery = useQuery({
@@ -76,11 +76,7 @@ export function App() {
       activeProvider={activeProvider}
       selectedVersionId={activeVersionId}
     >
-      {(Object.keys(page) as PageId[]).map(id => (
-        <div key={id} className={id === activePage ? 'contents' : 'hidden'}>
-          {page[id]}
-        </div>
-      ))}
+      {page[activePage]}
     </AppShell>
   )
 }

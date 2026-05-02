@@ -79,8 +79,8 @@ export const commands = {
   runAgentChat: (agentId: string, messages: ChatMessage[]) =>
     call<AgentChatResult>('run_agent_chat', { agentId, messages }),
 
-  syncKline: (stockCode: string, mode: 'full' | 'incremental') =>
-    call<KlineSyncResult>('sync_kline', { stockCode, mode }),
+  syncKline: (stockCode: string, mode: 'full' | 'incremental', scope?: 'all' | 'incomplete' | 'symbols') =>
+    call<KlineSyncResult>('sync_kline', { stockCode, mode, scope }),
   getBars: (
     stockCode: string,
     frequency: '1d' | '1w' | '1M' | '1Q' | '1Y',
@@ -128,7 +128,7 @@ export const commands = {
     }),
 
   getStockMeta: (stockCode: string) =>
-    call<StockMeta>('get_stock_meta', { stockCode }),
+    call<StockMeta>('get_stock_meta', { code: stockCode }),
 
   reorderWatchlistItem: (itemId: string, position: 'top' | 'bottom') =>
     call<null>('reorder_watchlist_item', { itemId, position }),
@@ -136,14 +136,17 @@ export const commands = {
   moveWatchlistItem: (itemId: string, targetWatchlistId: string) =>
     call<null>('move_watchlist_item', { itemId, targetWatchlistId }),
 
+  copyWatchlistItem: (itemId: string, targetWatchlistId: string) =>
+    call<OkResult>('copy_watchlist_item', { itemId, targetWatchlistId }),
+
   createWatchlistGroup: (name: string) =>
-    call<string>('create_watchlist_group', { name }),
+    call<Watchlist>('create_watchlist_group', { name }),
 
   deleteWatchlistGroup: (watchlistId: string) =>
-    call<null>('delete_watchlist_group', { watchlistId }),
+    call<OkResult>('delete_watchlist_group', { watchlistId }),
 
   renameWatchlistGroup: (watchlistId: string, newName: string) =>
-    call<null>('rename_watchlist_group', { watchlistId, newName }),
+    call<OkResult>('rename_watchlist_group', { watchlistId, newName }),
 
   listChartAnnotations: (stockCode: string, tradeSystemVersionId?: string | null) =>
     call<ChartAnnotation[]>('list_chart_annotations', {

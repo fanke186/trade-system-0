@@ -57,6 +57,7 @@ export function KLineChartPanel({
   const onCrosshairBarRef = useRef(onCrosshairBar)
   const onCrosshairPositionRef = useRef(onCrosshairPosition)
   const selectedAnnotationRef = useRef<ChartAnnotation | null>(null)
+  const undoHistoryRef = useRef<Map<string, ChartAnnotationPayload[]>>(new Map())
 
   onCrosshairBarRef.current = onCrosshairBar
   onCrosshairPositionRef.current = onCrosshairPosition
@@ -113,7 +114,12 @@ export function KLineChartPanel({
   const updateAnnotationFromOverlay = useCallback(
     (annotation: ChartAnnotation, event: OverlayCallbackEvent) => {
       const payload = overlayEventToPayload(event, annotation, latestBarsRef.current)
-      if (payload) onAnnotationUpdate?.(annotation, payload)
+      if (payload) {
+        const history = undoHistoryRef.current.get(annotation.id) ?? []
+        history.push(annotation.payload)
+        undoHistoryRef.current.set(annotation.id, history.slice(-20))
+        onAnnotationUpdate?.(annotation, payload)
+      }
     },
     [onAnnotationUpdate]
   )
@@ -137,7 +143,7 @@ export function KLineChartPanel({
         },
         candle: {
           bar: {
-            upColor: '#0d0d0d',
+            upColor: 'rgba(220,38,38,0.12)',
             upBorderColor: '#dc2626',
             upWickColor: '#dc2626',
             downColor: '#0f9f6e',
@@ -352,9 +358,16 @@ export function KLineChartPanel({
       if (!selectedOverlayId) return
       const chart = chartRef.current
       if (!chart) return
+      const annotation = selectedAnnotationRef.current
+      if (annotation) {
+        const history = undoHistoryRef.current.get(annotation.id) ?? []
+        history.push(annotation.payload)
+        undoHistoryRef.current.set(annotation.id, history.slice(-20))
+        onAnnotationUpdate?.(annotation, { ...annotation.payload, color })
+      }
       chart.overrideOverlay?.({ id: selectedOverlayId, styles: { line: { color } } } as never)
     },
-    [selectedOverlayId]
+    [onAnnotationUpdate, selectedOverlayId]
   )
 
   const handleDeleteOverlay = useCallback(() => {
@@ -370,8 +383,13 @@ export function KLineChartPanel({
   }, [onAnnotationDelete, selectedOverlayId])
 
   const handleUndoOverlay = useCallback(() => {
-    handleDeleteOverlay()
-  }, [handleDeleteOverlay])
+    const annotation = selectedAnnotationRef.current
+    if (!annotation) return
+    const history = undoHistoryRef.current.get(annotation.id) ?? []
+    const previous = history.pop()
+    undoHistoryRef.current.set(annotation.id, history)
+    if (previous) onAnnotationUpdate?.(annotation, previous)
+  }, [onAnnotationUpdate])
 
   useEffect(() => {
     if (!selectedOverlayId) return
@@ -398,9 +416,24 @@ export function KLineChartPanel({
     )
   }
 
+  const priceTicks = createTicks(
+    Math.min(...bars.map(bar => bar.low)),
+    Math.max(...bars.map(bar => bar.high)),
+    5
+  )
+  const subTicks = createTicks(
+    0,
+    Math.max(...bars.map(bar => (subChartType === 'amount' ? bar.amount : bar.volume))),
+    4
+  )
+
   return (
     <div className="relative w-full h-full">
       <div ref={hostRef} className="kline-chart-host w-full h-full" />
+      <AxisLabels side="left" top={18} bottom={subPaneTop ?? 156} values={priceTicks} />
+      <AxisLabels side="right" top={18} bottom={subPaneTop ?? 156} values={priceTicks} />
+      <AxisLabels side="left" top={(subPaneTop ?? 0) + 28} bottom={12} values={subTicks} formatter={formatChineseUnit} />
+      <AxisLabels side="right" top={(subPaneTop ?? 0) + 28} bottom={12} values={subTicks} formatter={formatChineseUnit} />
 
       {/* Sub-chart toggle */}
       <div
@@ -432,6 +465,41 @@ export function KLineChartPanel({
   )
 }
 
+function AxisLabels({
+  side,
+  top,
+  bottom,
+  values,
+  formatter = value => trimUnitNumber(value, 2)
+}: {
+  side: 'left' | 'right'
+  top: number
+  bottom: number
+  values: number[]
+  formatter?: (value: number) => string
+}) {
+  if (!values.length) return null
+  return (
+    <div
+      className={`pointer-events-none absolute z-20 flex flex-col justify-between text-[9px] text-muted-foreground ${side === 'left' ? 'left-1 items-start' : 'right-1 items-end'}`}
+      style={{ top, bottom }}
+    >
+      {[...values].reverse().map(value => (
+        <span key={`${side}-${top}-${value}`} className="bg-background/35 px-0.5 font-mono">
+          {formatter(value)}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function createTicks(min: number, max: number, count: number) {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || count <= 1) return []
+  if (max === min) return [max]
+  const step = (max - min) / (count - 1)
+  return Array.from({ length: count }, (_, index) => min + step * index)
+}
+
 type OverlayPoint = { dataIndex?: number; timestamp?: number; value?: number }
 
 type OverlayCallbackEvent = {
@@ -456,6 +524,7 @@ function annotationToOverlay(annotation: ChartAnnotation, handlers: AnnotationOv
     mode: OverlayMode.WeakMagnet,
     modeSensitivity: 8,
     extendData: annotation.payload.label ?? '',
+    styles: annotation.payload.color ? { line: { color: annotation.payload.color } } : undefined,
     onClick: (event: OverlayCallbackEvent) => {
       handlers.onSelect(annotation, event)
       return false
@@ -534,6 +603,7 @@ function pointsToPayload(
       type: 'horizontal_line',
       price,
       label: base?.label ?? '手动画线',
+      ...(base?.color ? { color: base.color } : {}),
       ...(base?.reason ? { reason: base.reason } : {})
     }
   }
@@ -548,6 +618,7 @@ function pointsToPayload(
     start: { date: first.bar.date, price: first.price },
     end: { date: second.bar.date, price: second.price },
     label: base?.label ?? '手动画线',
+    ...(base?.color ? { color: base.color } : {}),
     ...(base?.reason ? { reason: base.reason } : {}),
     ...(snapped ? { snappedTo: snapped } : {})
   }

@@ -166,13 +166,19 @@ export type KlineSyncResult = {
 }
 
 export type Security = {
-  symbolId: number
+  symbol: string
   code: string
   name: string
   exchange: string
   board?: string | null
+  industry?: string | null
+  stockType: string
   listDate?: string | null
   status: string
+  latestPrice?: number | null
+  changePct?: number | null
+  latestDate?: string | null
+  dataStatus: string
 }
 
 export type WatchlistItem = {
@@ -249,6 +255,7 @@ export type ChartAnnotationPayload =
       price: number
       label?: string
       reason?: string
+      color?: string
     }
   | {
       type: 'ray'
@@ -257,6 +264,7 @@ export type ChartAnnotationPayload =
       label?: string
       reason?: string
       snappedTo?: 'high' | 'low'
+      color?: string
     }
 
 export type OkResult = {
@@ -264,6 +272,7 @@ export type OkResult = {
 }
 
 export type SecuritySearchResult = {
+  symbol: string
   code: string
   name: string
   marketType?: string | null
@@ -280,10 +289,13 @@ export type DataHealth = {
 }
 
 export type StockMeta = {
+  symbol: string
   code: string
   name: string
   exchange: string
   board?: string | null
+  industry?: string | null
+  stockType: string
   listDate?: string | null
   latestPrice?: number | null
   preClose?: number | null
