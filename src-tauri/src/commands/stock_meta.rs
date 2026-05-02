@@ -110,10 +110,7 @@ pub fn get_stock_meta(state: State<'_, AppState>, code: String) -> AppResult<Sto
     })
 }
 
-fn query_latest_bar(
-    conn: &DuckConnection,
-    symbol: &str,
-) -> AppResult<Option<(f64, f64, String)>> {
+fn query_latest_bar(conn: &DuckConnection, symbol: &str) -> AppResult<Option<(f64, f64, String)>> {
     let mut stmt = conn.prepare(
         r#"
         select close, pre_close, cast(trade_date as varchar)
@@ -125,7 +122,11 @@ fn query_latest_bar(
     )?;
     let result = stmt
         .query_row(duckdb::params![symbol], |row| {
-            Ok((row.get::<_, f64>(0)?, row.get::<_, f64>(1)?, row.get::<_, String>(2)?))
+            Ok((
+                row.get::<_, f64>(0)?,
+                row.get::<_, f64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })
         .optional()?;
     Ok(result)
@@ -135,12 +136,11 @@ fn is_stale(latest_date_str: &str) -> bool {
     let Ok(latest_date) = NaiveDate::parse_from_str(latest_date_str, "%Y-%m-%d") else {
         return true;
     };
-    let today = chrono::Utc::now()
-        .date_naive();
+    let today = chrono::Utc::now().date_naive();
     let boundary = match today.weekday() {
         Weekday::Mon => today - chrono::Duration::days(3), // compare against Fri
-        Weekday::Sat | Weekday::Sun => today,               // compare against today
-        _ => today - chrono::Duration::days(1),             // compare against yesterday
+        Weekday::Sat | Weekday::Sun => today,              // compare against today
+        _ => today - chrono::Duration::days(1),            // compare against yesterday
     };
     latest_date < boundary
 }

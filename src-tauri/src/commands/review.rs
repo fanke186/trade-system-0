@@ -1,6 +1,7 @@
 use crate::app_state::AppState;
 use crate::error::AppResult;
 use crate::models::{DailyReviewRun, StockReview};
+use crate::services::kline_query_service::resolve_symbol;
 use crate::services::review_service;
 use tauri::State;
 
@@ -20,6 +21,12 @@ pub fn get_stock_reviews(
     stock_code: Option<String>,
     trade_system_version_id: Option<String>,
 ) -> AppResult<Vec<StockReview>> {
+    let stock_code = if let Some(code) = stock_code {
+        let duck = state.duckdb.lock().expect("duckdb lock");
+        Some(resolve_symbol(&duck, &code)?)
+    } else {
+        None
+    };
     let conn = state.sqlite.lock().expect("sqlite lock");
     review_service::get_stock_reviews(&conn, stock_code, trade_system_version_id)
 }

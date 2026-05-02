@@ -1,6 +1,7 @@
 use crate::app_state::AppState;
 use crate::error::AppResult;
 use crate::models::{OkResult, Watchlist, WatchlistItem};
+use crate::services::kline_query_service::resolve_symbol;
 use crate::services::watchlist_service;
 use tauri::State;
 
@@ -26,8 +27,12 @@ pub fn add_watchlist_item(
     watchlist_id: String,
     stock_code: String,
 ) -> AppResult<WatchlistItem> {
+    let normalized = {
+        let duck = state.duckdb.lock().expect("duckdb lock");
+        resolve_symbol(&duck, &stock_code)?
+    };
     let conn = state.sqlite.lock().expect("sqlite lock");
-    watchlist_service::add_watchlist_item(&conn, watchlist_id, stock_code)
+    watchlist_service::add_watchlist_item(&conn, watchlist_id, normalized)
 }
 
 #[tauri::command]

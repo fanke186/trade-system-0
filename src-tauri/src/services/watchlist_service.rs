@@ -1,6 +1,8 @@
 use crate::error::{AppError, AppResult};
 use crate::models::{OkResult, Watchlist, WatchlistItem};
 use crate::services::common::{new_id, now_iso};
+use crate::services::kline_query_service::resolve_symbol;
+use duckdb::Connection as DuckConnection;
 use rusqlite::{params, Connection};
 
 pub fn list_watchlists(conn: &Connection) -> AppResult<Vec<Watchlist>> {
@@ -91,14 +93,18 @@ pub fn reorder_watchlist_item(
     let now = now_iso();
     let sort_order = match position {
         "top" => -1_i64,
-        "bottom" => {
-            conn.query_row(
-                "select coalesce(max(sort_order), 0) + 1 from watchlist_items",
-                [],
-                |row| row.get::<_, i64>(0),
-            )?
+        "bottom" => conn.query_row(
+            "select coalesce(max(sort_order), 0) + 1 from watchlist_items",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?,
+        _ => {
+            return Err(AppError::new(
+                "invalid_position",
+                "position 只允许 top、bottom",
+                true,
+            ))
         }
-        _ => return Err(AppError::new("invalid_position", "position 只允许 top、bottom", true)),
     };
     conn.execute(
         "update watchlist_items set sort_order = ?1, updated_at = ?2 where id = ?3",
@@ -173,11 +179,7 @@ pub fn delete_watchlist_group(conn: &Connection, watchlist_id: &str) -> AppResul
         |row| row.get(0),
     )?;
     if name == "我的自选" || name == "默认自选" {
-        return Err(AppError::new(
-            "protected",
-            "不能删除默认自选股分组",
-            true,
-        ));
+        return Err(AppError::new("protected", "不能删除默认自选股分组", true));
     }
     conn.execute(
         "delete from watchlist_items where watchlist_id = ?1",
@@ -229,4 +231,58 @@ pub fn list_items(conn: &Connection, watchlist_id: &str) -> AppResult<Vec<Watchl
         values.push(row?);
     }
     Ok(values)
+}
+
+pub fn normalize_existing_symbols(sqlite: &Connection, duck: &DuckConnection) -> AppResult<()> {
+    let mut stmt = sqlite.prepare(
+        r#"
+        select id, watchlist_id, stock_code
+          from watchlist_items
+         where instr(stock_code, '.') = 0
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+
+    let mut updates = Vec::new();
+    for row in rows {
+        let (id, watchlist_id, stock_code) = row?;
+        match resolve_symbol(duck, &stock_code) {
+            Ok(symbol) if symbol != stock_code => updates.push((id, watchlist_id, symbol)),
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(
+                    item_id = %id,
+                    stock_code = %stock_code,
+                    error = %error.message,
+                    "跳过无法归一化的自选标的"
+                );
+            }
+        }
+    }
+
+    for (id, watchlist_id, symbol) in updates {
+        let existing: Option<String> = sqlite
+            .query_row(
+                "select id from watchlist_items where watchlist_id = ?1 and stock_code = ?2 and id <> ?3 limit 1",
+                params![watchlist_id, symbol, id],
+                |row| row.get(0),
+            )
+            .ok();
+        if existing.is_some() {
+            sqlite.execute("delete from watchlist_items where id = ?1", params![id])?;
+        } else {
+            sqlite.execute(
+                "update watchlist_items set stock_code = ?1, updated_at = datetime('now') where id = ?2",
+                params![symbol, id],
+            )?;
+        }
+    }
+
+    Ok(())
 }

@@ -1,5 +1,6 @@
 use crate::db::{duckdb, migrations, sqlite};
 use crate::error::AppResult;
+use crate::services::watchlist_service;
 use rusqlite::Connection as SqliteConnection;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -45,6 +46,9 @@ impl AppState {
         tracing::info!("DuckDB 连接成功，正在执行迁移");
         duckdb::run_migrations(&duckdb)?;
         tracing::info!("DuckDB 迁移完成");
+
+        watchlist_service::normalize_existing_symbols(&sqlite, &duckdb)?;
+        tracing::info!("自选标的归一化检查完成");
 
         tracing::info!("应用状态初始化完成");
 

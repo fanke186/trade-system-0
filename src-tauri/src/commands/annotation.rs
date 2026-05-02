@@ -2,6 +2,7 @@ use crate::app_state::AppState;
 use crate::error::AppResult;
 use crate::models::{ChartAnnotation, OkResult, SaveChartAnnotationInput};
 use crate::services::annotation_service;
+use crate::services::kline_query_service::resolve_symbol;
 use tauri::State;
 
 #[tauri::command]
@@ -10,6 +11,10 @@ pub fn list_chart_annotations(
     stock_code: String,
     trade_system_version_id: Option<String>,
 ) -> AppResult<Vec<ChartAnnotation>> {
+    let stock_code = {
+        let duck = state.duckdb.lock().expect("duckdb lock");
+        resolve_symbol(&duck, &stock_code)?
+    };
     let conn = state.sqlite.lock().expect("sqlite lock");
     annotation_service::list_chart_annotations(&conn, &stock_code, trade_system_version_id)
 }
@@ -17,8 +22,12 @@ pub fn list_chart_annotations(
 #[tauri::command]
 pub fn save_chart_annotation(
     state: State<'_, AppState>,
-    annotation: SaveChartAnnotationInput,
+    mut annotation: SaveChartAnnotationInput,
 ) -> AppResult<ChartAnnotation> {
+    annotation.stock_code = {
+        let duck = state.duckdb.lock().expect("duckdb lock");
+        resolve_symbol(&duck, &annotation.stock_code)?
+    };
     let conn = state.sqlite.lock().expect("sqlite lock");
     annotation_service::save_chart_annotation(&conn, annotation)
 }
