@@ -1,9 +1,6 @@
 use crate::app_state::AppState;
-use crate::models::KlineSyncResult;
-use crate::services::csv_import_service;
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use tauri::{Emitter, Manager, State};
+use serde::Serialize;
+use tauri::State;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,18 +19,32 @@ pub async fn search_securities(
     limit: Option<usize>,
 ) -> Result<Vec<SecuritySearchResult>, String> {
     let db = state.duckdb.lock().map_err(|_| "lock busy".to_string())?;
-    let limit = limit.unwrap_or(20);
+    let limit = limit.unwrap_or(20).clamp(1, 100);
+    let keyword = keyword.trim();
     let pattern = format!("%{}%", keyword);
     let mut stmt = db
         .prepare(
             "SELECT symbol, code, name, market_type, stock_type FROM securities
-             WHERE (symbol LIKE ?1 OR code LIKE ?1 OR name LIKE ?2) AND status = 'active'
-             ORDER BY CASE WHEN symbol LIKE ?1 THEN 0 WHEN code LIKE ?1 THEN 1 ELSE 2 END, code, exchange
+             WHERE (
+                    lower(symbol) LIKE lower(?1)
+                 OR lower(code) LIKE lower(?1)
+                 OR lower(name) LIKE lower(?1)
+             )
+               AND status = 'active'
+             ORDER BY
+               CASE
+                 WHEN lower(symbol) = lower(?2) THEN 0
+                 WHEN lower(code) = lower(?2) THEN 1
+                 WHEN lower(code) LIKE lower(?1) THEN 2
+                 ELSE 3
+               END,
+               code,
+               exchange
              LIMIT ?3",
         )
         .map_err(|e| e.to_string())?;
     let results: Vec<SecuritySearchResult> = stmt
-        .query_map(duckdb::params![pattern, pattern, limit as i64], |row| {
+        .query_map(duckdb::params![pattern, keyword, limit as i64], |row| {
             Ok(SecuritySearchResult {
                 symbol: row.get(0)?,
                 code: row.get(1)?,
@@ -68,9 +79,7 @@ pub struct MarketBreakdown {
 }
 
 #[tauri::command]
-pub async fn get_data_health(
-    state: State<'_, AppState>,
-) -> Result<DataHealth, String> {
+pub async fn get_data_health(state: State<'_, AppState>) -> Result<DataHealth, String> {
     let db = state.duckdb.lock().map_err(|_| "lock busy".to_string())?;
     let total: i64 = db
         .query_row(
@@ -80,22 +89,24 @@ pub async fn get_data_health(
         )
         .unwrap_or(0);
 
-    let latest_date: Option<String> = db
-        .query_row("SELECT cast(MAX(trade_date) as varchar) FROM kline_bars WHERE period = '1d' AND adj_mode = 'none'", [], |r| r.get(0))
-        .ok();
-
-    let complete: i64 = if let Some(ref d) = latest_date {
-        db.query_row(
-            "SELECT COUNT(DISTINCT b.symbol) FROM kline_bars b
-             INNER JOIN securities s ON s.symbol = b.symbol
-             WHERE s.stock_type='stock' AND s.status='active' AND b.trade_date = ?1",
-            [d.as_str()],
+    let complete: i64 = db
+        .query_row(
+            "with stock_mapping as (
+            select m.app_symbol, m.last_kline_date
+              from kline_mapping m
+              join securities s on s.symbol = m.app_symbol
+             where s.stock_type = 'stock' and s.status = 'active'
+          ),
+          latest as (
+            select max(last_kline_date) as date from stock_mapping
+          )
+          select count(*)
+            from stock_mapping
+           where last_kline_date = (select date from latest)",
+            [],
             |r| r.get(0),
         )
-        .unwrap_or(0)
-    } else {
-        0
-    };
+        .unwrap_or(0);
 
     let incomplete = total - complete;
     let completeness_pct = if total > 0 {
@@ -113,15 +124,19 @@ pub async fn get_data_health(
 
     let mut stmt = db
         .prepare(
-            "SELECT COALESCE(s.market_type,'未知'), COUNT(*),
-                    COUNT(DISTINCT CASE WHEN b.symbol IS NOT NULL THEN s.symbol END)
-             FROM securities s
-             LEFT JOIN kline_bars b ON s.symbol = b.symbol
-                  AND b.period = '1d'
-                  AND b.adj_mode = 'none'
-                  AND b.trade_date = (SELECT MAX(trade_date) FROM kline_bars WHERE period = '1d' AND adj_mode = 'none')
-             WHERE s.stock_type='stock' AND s.status='active'
-             GROUP BY s.market_type ORDER BY COUNT(*) DESC",
+            "with latest as (
+                select max(last_kline_date) as date
+                  from kline_mapping m
+                  join securities s on s.symbol = m.app_symbol
+                 where s.stock_type = 'stock' and s.status = 'active'
+             )
+             select coalesce(s.market_type, '未知'), count(*),
+                    count(case when m.last_kline_date = (select date from latest) then 1 end)
+               from securities s
+               left join kline_mapping m on m.app_symbol = s.symbol
+              where s.stock_type = 'stock' and s.status = 'active'
+              group by s.market_type
+              order by count(*) desc",
         )
         .map_err(|e| e.to_string())?;
     let by_market: Vec<MarketBreakdown> = stmt
@@ -144,145 +159,4 @@ pub async fn get_data_health(
         mood,
         by_market,
     })
-}
-
-#[derive(Deserialize)]
-struct EastmoneySecItem {
-    #[serde(rename = "f12")]
-    code: String,
-    #[serde(rename = "f13")]
-    market: i32,
-    #[serde(rename = "f14")]
-    name: String,
-    #[serde(rename = "f100")]
-    industry: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct EastmoneySecResponse {
-    data: Option<EastmoneySecData>,
-}
-
-#[derive(Deserialize)]
-struct EastmoneySecData {
-    diff: Option<Vec<EastmoneySecItem>>,
-}
-
-#[tauri::command]
-pub async fn sync_securities_metadata(
-    app: tauri::AppHandle,
-) -> Result<i64, String> {
-    app.emit("securities-sync-progress", serde_json::json!({
-        "status": "started", "percent": 0
-    })).ok();
-
-    let app_handle = app.clone();
-    let result: Result<i64, String> = tokio::task::spawn_blocking(move || {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .user_agent("Mozilla/5.0 trade-system-0/0.1")
-            .build()
-            .map_err(|e| format!("Client build: {e}"))?;
-
-        let mut total_upserted = 0i64;
-        for page in 1..=3i32 {
-            let url = format!(
-                "https://push2.eastmoney.com/api/qt/clist/get?pn={page}&pz=5000&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f2,f3,f4,f12,f13,f14,f100"
-            );
-            let resp = client.get(&url)
-                .header("Referer", "https://quote.eastmoney.com/")
-                .send()
-                .map_err(|e| format!("HTTP: {e}"))?;
-            let body: EastmoneySecResponse = resp.json()
-                .map_err(|e| format!("JSON: {e}"))?;
-
-            let items = match body.data.and_then(|d| d.diff) {
-                Some(v) => v,
-                None => break,
-            };
-            if items.is_empty() { break; }
-
-            let rows: Vec<(String, String, String, String, String, Option<String>)> = items.iter()
-                .filter(|item| !item.code.starts_with('9') && item.code.len() <= 6)
-                .map(|item| {
-                    let exchange = if item.market == 1 { "SH" } else { "SZ" };
-                    let market_type = if item.code.starts_with("688") { "科创板" }
-                        else if item.code.starts_with("300") || item.code.starts_with("301") { "创业板" }
-                        else if item.code.starts_with("8") || item.code.starts_with("4") { "北交所" }
-                        else { "主板" };
-                    (
-                        format!("{}.{}", item.code, exchange),
-                        item.code.clone(),
-                        item.name.clone(),
-                        exchange.to_string(),
-                        market_type.to_string(),
-                        item.industry.clone(),
-                    )
-                })
-                .collect();
-
-            {
-                let app_state = app_handle.state::<AppState>();
-                let db = app_state.duckdb.lock().map_err(|_| "lock poisoned".to_string())?;
-                for (symbol, code, name, exchange, market_type, industry) in &rows {
-                    db.execute(
-                        "insert into securities (symbol, code, name, exchange, board, market_type, stock_type, industry, status, updated_at)
-                         values (?1, ?2, ?3, ?4, ?5, ?6, 'stock', ?7, 'active', current_timestamp)
-                         on conflict(symbol) do update set
-                           name = excluded.name,
-                           board = coalesce(excluded.board, securities.board),
-                           market_type = coalesce(excluded.market_type, securities.market_type),
-                           industry = coalesce(excluded.industry, securities.industry),
-                           status = excluded.status,
-                           updated_at = current_timestamp",
-                        duckdb::params![symbol, code, name, exchange, market_type, market_type, industry],
-                    ).ok();
-                }
-            }
-            total_upserted += rows.len() as i64;
-            app_handle.emit("securities-sync-progress", serde_json::json!({
-                "status": "syncing", "percent": ((page as f64 / 3.0) * 100.0) as i32, "count": total_upserted
-            })).ok();
-        }
-
-        app_handle.emit("securities-sync-progress", serde_json::json!({
-            "status": "completed", "percent": 100, "count": total_upserted
-        })).ok();
-
-        Ok(total_upserted)
-    }).await.map_err(|e| format!("Join error: {e}"))?;
-
-    result
-}
-
-#[tauri::command]
-pub async fn import_csv_data(
-    app: tauri::AppHandle,
-    _state: State<'_, AppState>,
-    dir_path: String,
-) -> Result<KlineSyncResult, String> {
-    let dir = PathBuf::from(&dir_path);
-    tracing::info!(dir = %dir.display(), "import_csv_data 命令被调用");
-
-    let _ = app.emit(
-        "kline-sync-progress",
-        serde_json::json!({ "stockCode": "", "status": "started", "percent": 0 }),
-    );
-
-    let app_handle = app.clone();
-    let d = dir.clone();
-    let result: Result<KlineSyncResult, String> = tokio::task::spawn_blocking(move || {
-        let app_state = app_handle.state::<AppState>();
-        let conn = app_state.duckdb.lock().map_err(|_| "DuckDB 锁被占用".to_string())?;
-        csv_import_service::import_csv_directory(&conn, &d).map_err(|e| e.message)
-    })
-    .await
-    .map_err(|e| format!("Join error: {e}"))?;
-
-    let _ = app.emit(
-        "kline-sync-progress",
-        serde_json::json!({ "stockCode": "", "status": "completed", "percent": 100 }),
-    );
-
-    result
 }

@@ -157,6 +157,18 @@ pub fn run_migrations(conn: &DuckConnection) -> AppResult<()> {
           primary key (symbol, period, adj_mode, trade_date)
         );
 
+        create table if not exists kline_mapping (
+          trade_symbol text primary key,
+          app_symbol text not null,
+          code text not null,
+          exchange text not null,
+          name text,
+          stock_type text not null default 'stock',
+          last_sync_at timestamp,
+          last_kline_date date,
+          kline_count integer not null default 0
+        );
+
         alter table bars_1d add column if not exists change double;
         alter table bars_1d add column if not exists change_pct double;
         alter table bars_1d add column if not exists amplitude double;
@@ -183,12 +195,19 @@ pub fn run_migrations(conn: &DuckConnection) -> AppResult<()> {
         alter table securities add column if not exists updated_at timestamp;
         alter table securities add column if not exists total_cap double;
         alter table securities add column if not exists pe_ratio double;
+        alter table securities add column if not exists market_symbol text;
 
         update securities set stock_type = 'stock' where stock_type is null;
         update securities
            set symbol = code || '.' || exchange
          where symbol is null and exchange in ('SH', 'SZ', 'BJ');
 
+        create index if not exists idx_kline_mapping_app on kline_mapping(app_symbol);
+        create index if not exists idx_kline_mapping_code on kline_mapping(code);
+        create index if not exists idx_securities_market_symbol on securities(market_symbol);
+
+        insert or ignore into schema_migrations (id, applied_at)
+        values ('0004_market_sync_mapping', current_timestamp);
         insert or ignore into schema_migrations (id, applied_at)
         values ('0003_add_bars_1Q_1Y', current_timestamp);
         insert or ignore into schema_migrations (id, applied_at)
@@ -227,13 +246,15 @@ fn rebuild_securities_table(conn: &DuckConnection) -> AppResult<()> {
           limit_down double,
           total_cap double,
           pe_ratio double,
+          market_symbol text,
           updated_at timestamp
         );
 
         insert or replace into securities_rebuilt
           (symbol, code, name, exchange, board, list_date, delist_date, status,
            industry, sub_industry, area, market_type, stock_type, total_shares,
-           float_shares, tick_size, limit_up, limit_down, total_cap, pe_ratio, updated_at)
+           float_shares, tick_size, limit_up, limit_down, total_cap, pe_ratio,
+           market_symbol, updated_at)
         select
           coalesce(nullif(symbol, ''), code || '.' || exchange),
           code,
@@ -255,6 +276,7 @@ fn rebuild_securities_table(conn: &DuckConnection) -> AppResult<()> {
           limit_down,
           total_cap,
           pe_ratio,
+          market_symbol,
           coalesce(updated_at, current_timestamp)
         from securities
         where coalesce(nullif(symbol, ''), code || '.' || exchange) is not null;
@@ -270,10 +292,38 @@ fn rebuild_securities_table(conn: &DuckConnection) -> AppResult<()> {
 
 fn seed_defaults(conn: &DuckConnection) -> AppResult<()> {
     for (symbol, code, name, exchange, board, list_date) in [
-        ("002261.SZ", "002261", "拓维信息", "SZ", "主板", "2008-07-23"),
-        ("000001.SZ", "000001", "平安银行", "SZ", "主板", "1991-04-03"),
-        ("300750.SZ", "300750", "宁德时代", "SZ", "创业板", "2018-06-11"),
-        ("600519.SH", "600519", "贵州茅台", "SH", "主板", "2001-08-27"),
+        (
+            "002261.SZ",
+            "002261",
+            "拓维信息",
+            "SZ",
+            "主板",
+            "2008-07-23",
+        ),
+        (
+            "000001.SZ",
+            "000001",
+            "平安银行",
+            "SZ",
+            "主板",
+            "1991-04-03",
+        ),
+        (
+            "300750.SZ",
+            "300750",
+            "宁德时代",
+            "SZ",
+            "创业板",
+            "2018-06-11",
+        ),
+        (
+            "600519.SH",
+            "600519",
+            "贵州茅台",
+            "SH",
+            "主板",
+            "2001-08-27",
+        ),
     ] {
         conn.execute(
             "insert or ignore into securities (symbol, code, name, exchange, board, list_date, market_type, stock_type, status, updated_at)

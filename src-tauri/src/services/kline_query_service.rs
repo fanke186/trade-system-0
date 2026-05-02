@@ -20,7 +20,11 @@ pub fn list_securities(
            group by symbol
         ),
         global_latest as (
-          select max(trade_date) as date from kline_bars where period = '1d' and adj_mode = 'none'
+          select max(m.last_kline_date) as date
+            from kline_mapping m
+            join securities s on s.symbol = m.app_symbol
+           where coalesce(s.stock_type, 'stock') = 'stock'
+             and s.status = 'active'
         ),
         latest_bar as (
           select b.symbol, b.close, b.change_pct, cast(b.trade_date as varchar) as trade_date
@@ -32,12 +36,15 @@ pub fn list_securities(
                cast(s.list_date as varchar), s.status, lb.close, lb.change_pct, lb.trade_date,
                case
                  when lb.trade_date is null then 'missing'
-                 when cast(lb.trade_date as date) = (select date from global_latest) then 'complete'
+                 when km.last_kline_date = (select date from global_latest) then 'complete'
                  else 'stale'
                end as data_status
           from securities s
           left join latest_bar lb on lb.symbol = s.symbol
-         where s.code like ?1 or s.name like ?1 or s.symbol like ?1
+          left join kline_mapping km on km.app_symbol = s.symbol
+         where lower(s.code) like lower(?1)
+            or lower(s.name) like lower(?1)
+            or lower(s.symbol) like lower(?1)
          order by s.code, s.exchange
          limit ?2
         "#,
@@ -96,7 +103,7 @@ pub fn get_bars(
              limit ?6
           ) t
          order by t.trade_date asc
-        "#
+        "#,
     )?;
     let rows = stmt.query_map(
         duckdb::params![symbol, frequency, adj_mode, start_date, end_date, limit],

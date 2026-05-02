@@ -130,6 +130,13 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
           created_at text not null
         );
 
+        create table if not exists trade_system_stocks (
+          trade_system_id text not null references trade_systems(id),
+          stock_code text not null,
+          created_at text not null,
+          primary key (trade_system_id, stock_code)
+        );
+
         create table if not exists chart_annotations (
           id text primary key,
           stock_code text not null,
