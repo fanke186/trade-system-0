@@ -1,23 +1,21 @@
 use crate::db::duckdb::DuckConnection;
 use crate::error::{AppError, AppResult};
-use crate::models::KlineSyncResult;
+use crate::models::{FrequencyCoverage, KlineCoverage, KlineSyncResult};
 use crate::services::common::new_id;
 use crate::services::{kline_import_service, kline_query_service};
 use serde_json::Value;
-use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use tauri::Emitter;
 
-const DEFAULT_DATA_DIR: &str = "./data/klines";
+const DEFAULT_DATA_DIR: &str = "./data/klines/current";
+const PERIODS: [&str; 5] = ["1d", "1w", "1M", "1Q", "1Y"];
+const ADJ_MODES: [&str; 3] = ["none", "forward", "backward"];
 
 #[derive(Debug, Default)]
 pub struct SyncScriptResult {
     pub data_dir: PathBuf,
-    pub periods: HashMap<String, i64>,
-    pub total_bars: i64,
-    pub total_symbols: i64,
 }
 
 /// Spawn Python script, parse progress JSON from stdout, emit to frontend.
@@ -25,6 +23,7 @@ pub fn run_sync_script(
     app: &tauri::AppHandle,
     stock_code: &str,
     mode: &str,
+    scope: &str,
     project_root: &std::path::Path,
 ) -> AppResult<SyncScriptResult> {
     let python = find_python()?;
@@ -36,7 +35,13 @@ pub fn run_sync_script(
         .arg("--data-dir")
         .arg(data_dir.to_string_lossy().to_string())
         .arg("--mode")
-        .arg(mode);
+        .arg(mode)
+        .arg("--scope")
+        .arg(if stock_code.is_empty() { scope } else { "symbols" })
+        .arg("--periods")
+        .arg(PERIODS.join(","))
+        .arg("--adj")
+        .arg(ADJ_MODES.join(","));
 
     if !stock_code.is_empty() {
         cmd.arg("--symbols").arg(stock_code);
@@ -217,14 +222,16 @@ pub fn import_and_finalize(
         duckdb::params![run_id, stock_code, mode],
     )?;
 
-    let mut total_rows = 0_i64;
-    for period in &["1d", "1w", "1M", "1Q", "1Y"] {
-        match kline_import_service::import_parquet(conn, &result.data_dir, period) {
+    let mut total_rows = kline_import_service::import_securities(conn, &result.data_dir)?;
+    for period in PERIODS {
+        for adj_mode in ADJ_MODES {
+            match kline_import_service::import_parquet(conn, &result.data_dir, period, adj_mode) {
             Ok(rows) => {
                 total_rows += rows;
             }
             Err(e) => {
-                tracing::warn!(period = period, error = %e.message, "Parquet import failed for period");
+                    tracing::warn!(period = period, adj_mode = adj_mode, error = %e.message, "Parquet import failed for partition");
+                }
             }
         }
     }
@@ -234,7 +241,11 @@ pub fn import_and_finalize(
         duckdb::params!["ok", total_rows, run_id],
     )?;
 
-    let coverage = kline_query_service::get_data_coverage(conn, stock_code)?;
+    let coverage = if stock_code.is_empty() {
+        global_coverage(conn)?
+    } else {
+        kline_query_service::get_data_coverage(conn, stock_code)?
+    };
 
     Ok(KlineSyncResult {
         stock_code: stock_code.to_string(),
@@ -244,6 +255,43 @@ pub fn import_and_finalize(
         source: "tickflow".to_string(),
         coverage,
     })
+}
+
+fn global_coverage(conn: &DuckConnection) -> AppResult<KlineCoverage> {
+    Ok(KlineCoverage {
+        stock_code: "ALL".to_string(),
+        daily: global_frequency_coverage(conn, "1d")?,
+        weekly: global_frequency_coverage(conn, "1w")?,
+        monthly: global_frequency_coverage(conn, "1M")?,
+        quarterly: global_frequency_coverage(conn, "1Q")?,
+        yearly: global_frequency_coverage(conn, "1Y")?,
+        last_sync_at: conn
+            .query_row(
+                "select cast(max(finished_at) as varchar) from kline_sync_runs where status = 'ok'",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten(),
+    })
+}
+
+fn global_frequency_coverage(conn: &DuckConnection, frequency: &str) -> AppResult<FrequencyCoverage> {
+    conn.query_row(
+        "select cast(min(trade_date) as varchar), cast(max(trade_date) as varchar), count(*)
+           from kline_bars
+          where period = ?1 and adj_mode = 'none'",
+        duckdb::params![frequency],
+        |row| {
+            Ok(FrequencyCoverage {
+                frequency: frequency.to_string(),
+                start_date: row.get(0)?,
+                end_date: row.get(1)?,
+                rows: row.get(2)?,
+            })
+        },
+    )
+    .map_err(Into::into)
 }
 
 fn find_python() -> AppResult<String> {

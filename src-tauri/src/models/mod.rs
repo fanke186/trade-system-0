@@ -154,13 +154,19 @@ pub struct AgentChatResult {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Security {
-    pub symbol_id: i64,
+    pub symbol: String,
     pub code: String,
     pub name: String,
     pub exchange: String,
     pub board: Option<String>,
+    pub industry: Option<String>,
+    pub stock_type: String,
     pub list_date: Option<String>,
     pub status: String,
+    pub latest_price: Option<f64>,
+    pub change_pct: Option<f64>,
+    pub latest_date: Option<String>,
+    pub data_status: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -308,10 +314,13 @@ pub struct SaveChartAnnotationInput {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct StockMeta {
+    pub symbol: String,
     pub code: String,
     pub name: String,
     pub exchange: String,
     pub board: Option<String>,
+    pub industry: Option<String>,
+    pub stock_type: String,
     pub list_date: Option<String>,
     pub latest_price: Option<f64>,
     pub pre_close: Option<f64>,

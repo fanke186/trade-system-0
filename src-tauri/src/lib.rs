@@ -51,6 +51,7 @@ pub fn run() {
             commands::stock_meta::get_stock_meta,
             commands::watchlist_ops::reorder_watchlist_item,
             commands::watchlist_ops::move_watchlist_item,
+            commands::watchlist_ops::copy_watchlist_item,
             commands::watchlist_ops::create_watchlist_group,
             commands::watchlist_ops::delete_watchlist_group,
             commands::watchlist_ops::rename_watchlist_group,

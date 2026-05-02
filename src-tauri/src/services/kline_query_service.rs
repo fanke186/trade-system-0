@@ -13,22 +13,50 @@ pub fn list_securities(
     let like = format!("%{}%", keyword);
     let mut stmt = conn.prepare(
         r#"
-        select symbol_id, code, name, exchange, board, cast(list_date as varchar), status
-          from securities
-         where code like ?1 or name like ?1
-         order by code
+        with latest as (
+          select symbol, max(trade_date) as latest_date
+            from kline_bars
+           where period = '1d' and adj_mode = 'none'
+           group by symbol
+        ),
+        global_latest as (
+          select max(trade_date) as date from kline_bars where period = '1d' and adj_mode = 'none'
+        ),
+        latest_bar as (
+          select b.symbol, b.close, b.change_pct, cast(b.trade_date as varchar) as trade_date
+            from kline_bars b
+            join latest l on l.symbol = b.symbol and l.latest_date = b.trade_date
+           where b.period = '1d' and b.adj_mode = 'none'
+        )
+        select s.symbol, s.code, s.name, s.exchange, s.board, s.industry, coalesce(s.stock_type, 'stock'),
+               cast(s.list_date as varchar), s.status, lb.close, lb.change_pct, lb.trade_date,
+               case
+                 when lb.trade_date is null then 'missing'
+                 when cast(lb.trade_date as date) = (select date from global_latest) then 'complete'
+                 else 'stale'
+               end as data_status
+          from securities s
+          left join latest_bar lb on lb.symbol = s.symbol
+         where s.code like ?1 or s.name like ?1 or s.symbol like ?1
+         order by s.code, s.exchange
          limit ?2
         "#,
     )?;
     let rows = stmt.query_map(duckdb::params![like, limit], |row| {
         Ok(Security {
-            symbol_id: row.get(0)?,
+            symbol: row.get(0)?,
             code: row.get(1)?,
             name: row.get(2)?,
             exchange: row.get(3)?,
             board: row.get(4)?,
-            list_date: row.get(5)?,
-            status: row.get(6)?,
+            industry: row.get(5)?,
+            stock_type: row.get(6)?,
+            list_date: row.get(7)?,
+            status: row.get(8)?,
+            latest_price: row.get(9)?,
+            change_pct: row.get(10)?,
+            latest_date: row.get(11)?,
+            data_status: row.get(12)?,
         })
     })?;
     let mut values = Vec::new();
@@ -47,28 +75,31 @@ pub fn get_bars(
     limit: Option<i64>,
     adj: Option<String>,
 ) -> AppResult<Vec<KlineBar>> {
-    let table = frequency_table(frequency)?;
-    let symbol_id = get_symbol_id(conn, stock_code)?;
+    validate_frequency(frequency)?;
+    let symbol = resolve_symbol(conn, stock_code)?;
+    let adj_mode = normalize_adj(adj.as_deref());
     let limit = limit.unwrap_or(500).clamp(1, 5000);
-    let mut stmt = conn.prepare(&format!(
+    let mut stmt = conn.prepare(
         r#"
         select *
           from (
             select cast(trade_date as varchar) as trade_date, open, high, low, close,
-                   pre_close, volume, amount, turnover, adj_factor,
+                   pre_close, volume, amount, turnover_rate, null as adj_factor,
                    change, change_pct, amplitude
-              from {table}
-             where symbol_id = ?1
-               and (?2 is null or trade_date >= cast(?2 as date))
-               and (?3 is null or trade_date <= cast(?3 as date))
+             from kline_bars
+             where symbol = ?1
+               and period = ?2
+               and adj_mode = ?3
+               and (?4 is null or trade_date >= cast(?4 as date))
+               and (?5 is null or trade_date <= cast(?5 as date))
              order by trade_date desc
-             limit ?4
+             limit ?6
           ) t
          order by t.trade_date asc
         "#
-    ))?;
+    )?;
     let rows = stmt.query_map(
-        duckdb::params![symbol_id, start_date, end_date, limit],
+        duckdb::params![symbol, frequency, adj_mode, start_date, end_date, limit],
         |row| {
             Ok(KlineBar {
                 date: row.get(0)?,
@@ -92,110 +123,41 @@ pub fn get_bars(
         values.push(row?);
     }
 
-    // Apply adjustment factor if requested
-    if let Some(adj_mode) = adj {
-        match adj_mode.as_str() {
-            "pre" => apply_pre_adj(&mut values),
-            "post" => apply_post_adj(&mut values),
-            _ => {} // unknown mode, return unadjusted
-        }
-    }
-
     Ok(values)
 }
 
-fn apply_pre_adj(bars: &mut [KlineBar]) {
-    if bars.is_empty() {
-        return;
-    }
-    let last_adj = bars.last().and_then(|b| b.adj_factor).unwrap_or(1.0);
-    if last_adj == 0.0 {
-        return;
-    }
-    for bar in bars.iter_mut() {
-        if let Some(factor) = bar.adj_factor {
-            if factor != 0.0 {
-                let ratio = last_adj / factor;
-                bar.open *= ratio;
-                bar.high *= ratio;
-                bar.low *= ratio;
-                bar.close *= ratio;
-                bar.pre_close = bar.pre_close.map(|v| v * ratio);
-                bar.volume /= ratio;
-                bar.amount /= ratio;
-            }
-        }
-    }
-}
-
-fn apply_post_adj(bars: &mut [KlineBar]) {
-    if bars.is_empty() {
-        return;
-    }
-    let first_adj = bars.first().and_then(|b| b.adj_factor).unwrap_or(1.0);
-    if first_adj == 0.0 {
-        return;
-    }
-    for bar in bars.iter_mut() {
-        if let Some(factor) = bar.adj_factor {
-            if factor != 0.0 {
-                let ratio = factor / first_adj;
-                bar.open *= ratio;
-                bar.high *= ratio;
-                bar.low *= ratio;
-                bar.close *= ratio;
-                bar.pre_close = bar.pre_close.map(|v| v * ratio);
-                bar.volume /= ratio;
-                bar.amount /= ratio;
-            }
-        }
-    }
-}
-
 pub fn get_data_coverage(conn: &DuckConnection, stock_code: &str) -> AppResult<KlineCoverage> {
-    let symbol_id = get_symbol_id(conn, stock_code)?;
+    let symbol = resolve_symbol(conn, stock_code)?;
     let last_sync_at = conn
         .query_row(
             "select cast(max(finished_at) as varchar) from kline_sync_runs where stock_code = ?1 and status = 'ok'",
-            duckdb::params![stock_code],
+            duckdb::params![symbol],
             |row| row.get::<_, Option<String>>(0),
         )
         .optional()?
         .flatten();
 
     Ok(KlineCoverage {
-        stock_code: stock_code.to_string(),
-        daily: coverage_for(conn, symbol_id, "bars_1d", "1d")?,
-        weekly: coverage_for(conn, symbol_id, "bars_1w", "1w")?,
-        monthly: coverage_for(conn, symbol_id, "bars_1M", "1M")?,
-        quarterly: coverage_for(conn, symbol_id, "bars_1Q", "1Q")?,
-        yearly: coverage_for(conn, symbol_id, "bars_1Y", "1Y")?,
+        stock_code: symbol.clone(),
+        daily: coverage_for(conn, &symbol, "1d")?,
+        weekly: coverage_for(conn, &symbol, "1w")?,
+        monthly: coverage_for(conn, &symbol, "1M")?,
+        quarterly: coverage_for(conn, &symbol, "1Q")?,
+        yearly: coverage_for(conn, &symbol, "1Y")?,
         last_sync_at,
     })
 }
 
-pub fn get_symbol_id(conn: &DuckConnection, stock_code: &str) -> AppResult<i64> {
-    conn.query_row(
-        "select symbol_id from securities where code = ?1",
-        duckdb::params![stock_code],
-        |row| row.get(0),
-    )
-    .optional()?
-    .ok_or_else(|| AppError::new("not_found", "证券不存在，请先同步或检查代码", true))
-}
-
 fn coverage_for(
     conn: &DuckConnection,
-    symbol_id: i64,
-    table: &str,
+    symbol: &str,
     frequency: &str,
 ) -> AppResult<FrequencyCoverage> {
     conn.query_row(
-        &format!(
-            "select cast(min(trade_date) as varchar), cast(max(trade_date) as varchar), count(*) from {} where symbol_id = ?1",
-            table
-        ),
-        duckdb::params![symbol_id],
+        "select cast(min(trade_date) as varchar), cast(max(trade_date) as varchar), count(*)
+           from kline_bars
+          where symbol = ?1 and period = ?2 and adj_mode = 'none'",
+        duckdb::params![symbol, frequency],
         |row| {
             Ok(FrequencyCoverage {
                 frequency: frequency.to_string(),
@@ -208,13 +170,34 @@ fn coverage_for(
     .map_err(Into::into)
 }
 
-fn frequency_table(frequency: &str) -> AppResult<&'static str> {
+pub fn resolve_symbol(conn: &DuckConnection, input: &str) -> AppResult<String> {
+    conn.query_row(
+        r#"
+        select symbol
+          from securities
+         where symbol = ?1 or code = ?1
+         order by case when symbol = ?1 then 0 when stock_type = 'stock' then 1 else 2 end,
+                  case exchange when 'SZ' then 0 when 'SH' then 1 when 'BJ' then 2 else 3 end
+         limit 1
+        "#,
+        duckdb::params![input],
+        |row| row.get(0),
+    )
+    .optional()?
+    .ok_or_else(|| AppError::new("not_found", "证券不存在，请先同步或检查代码", true))
+}
+
+fn normalize_adj(adj: Option<&str>) -> &'static str {
+    match adj {
+        Some("pre") | Some("forward") => "forward",
+        Some("post") | Some("backward") => "backward",
+        _ => "none",
+    }
+}
+
+fn validate_frequency(frequency: &str) -> AppResult<()> {
     match frequency {
-        "1d" => Ok("bars_1d"),
-        "1w" => Ok("bars_1w"),
-        "1M" => Ok("bars_1M"),
-        "1Q" => Ok("bars_1Q"),
-        "1Y" => Ok("bars_1Y"),
+        "1d" | "1w" | "1M" | "1Q" | "1Y" => Ok(()),
         _ => Err(AppError::new(
             "invalid_frequency",
             "frequency 只允许 1d、1w、1M、1Q、1Y",

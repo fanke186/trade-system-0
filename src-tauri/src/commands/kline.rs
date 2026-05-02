@@ -12,8 +12,16 @@ pub async fn sync_kline(
     state: State<'_, AppState>,
     stock_code: String,
     mode: String,
+    scope: Option<String>,
 ) -> AppResult<KlineSyncResult> {
     kline_sync_service::validate_mode(&mode)?;
+    let sync_scope = scope.unwrap_or_else(|| {
+        if stock_code.is_empty() {
+            "incomplete".to_string()
+        } else {
+            "symbols".to_string()
+        }
+    });
 
     let _ = app.emit(
         "kline-sync-progress",
@@ -27,10 +35,11 @@ pub async fn sync_kline(
     let app_handle = app.clone();
     let sc = stock_code.clone();
     let m = mode.clone();
+    let s = sync_scope.clone();
     let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     let script_result = tokio::task::spawn_blocking(move || {
-        kline_sync_service::run_sync_script(&app_handle, &sc, &m, &project_root)
+        kline_sync_service::run_sync_script(&app_handle, &sc, &m, &s, &project_root)
     })
     .await
     .map_err(|e| {
