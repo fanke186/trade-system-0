@@ -44,42 +44,45 @@
 
 - [ ] **Step 1: 添加 migration SQL**
 
-在 `run_migrations` 函数末尾追加 migration v3：
+在 `run_migrations` 函数 `execute_batch` 块的最后一个 SQL 语句之后，`")?;` 之前追加。注意 SQLite 不支持 `ALTER TABLE ADD COLUMN IF NOT EXISTS`，用逐个 try 处理：
 
 ```rust
-// sqlite.rs run_migrations 函数末尾追加
+        // v3: trade_system_agents redesign
+        -- trade_systems 扩展列（SQLite 不支持 ADD IF NOT EXISTS，用 Rust 逐列处理见下）
+        -- trade_system_stocks 表重建（旧表 schema 不同，drop 后重建）
+        "#,
+    )?;
 
-conn.execute_batch("
-    -- v3: trade_system_agents redesign
+    // v3 migration: 逐列安全添加（SQLite 不支持 ADD COLUMN IF NOT EXISTS）
+    let alter_cols = [
+        "alter table trade_systems add column version integer not null default 1",
+        "alter table trade_systems add column system_md text not null default ''",
+        "alter table trade_systems add column system_path text",
+        "alter table trade_systems add column status text not null default 'active'",
+    ];
+    for stmt in &alter_cols {
+        conn.execute(stmt, []).ok(); // ignore error if column already exists
+    }
 
-    -- trade_systems 扩展列
-    alter table trade_systems add column if not exists description text;
-    alter table trade_systems add column if not exists version integer not null default 1;
-    alter table trade_systems add column if not exists system_md text not null default '';
-    alter table trade_systems add column if not exists system_path text;
-    alter table trade_systems add column if not exists status text not null default 'active';
-    alter table trade_systems add column if not exists updated_at timestamp;
+    // trade_system_stocks: 旧表有不同 schema（trade_system_id, stock_code, created_at），
+    // 且通常为空或几乎为空，drop 重建
+    conn.execute_batch("
+        drop table if exists trade_system_stocks;
+        create table trade_system_stocks (
+            id                  text primary key,
+            trade_system_id     text not null references trade_systems(id),
+            symbol              text not null,
+            latest_score        integer,
+            latest_report       text,
+            latest_report_path  text,
+            latest_score_date   text,
+            updated_at          text not null default (datetime('now')),
+            unique(trade_system_id, symbol)
+        );
 
-    -- trade_system_versions 扩展
-    alter table trade_system_versions add column if not exists change_summary text;
-
-    -- trade_system_stocks 关联表
-    create table if not exists trade_system_stocks (
-        id                text primary key,
-        trade_system_id   text not null references trade_systems(id),
-        symbol            text not null,
-        latest_score      integer,
-        latest_report     text,
-        latest_report_path text,
-        latest_score_date text,
-        updated_at        timestamp not null default current_timestamp,
-        unique(trade_system_id, symbol)
-    );
-
-    -- 活跃名称唯一索引
-    create unique index if not exists idx_trade_systems_name_active
-        on trade_systems(name) where status = 'active';
-")?;
+        create unique index if not exists idx_trade_systems_name_active
+            on trade_systems(name) where status = 'active';
+    ")?;
 ```
 
 - [ ] **Step 2: 编译验证**
@@ -106,7 +109,32 @@ git commit -m "feat(db): trade_systems 扩展列 + trade_system_stocks 关联表
 
 - [ ] **Step 1: 添加新模型**
 
-在 `models/mod.rs` 的 `StockReview` 之后添加：
+先更新现有 `TradeSystemSummary` struct，在 `updated_at` 之前添加 `stock_count` 字段：
+
+```rust
+// 找到 TradeSystemSummary struct（约第15行），添加 stock_count
+pub struct TradeSystemSummary {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub active_version_id: Option<String>,
+    pub active_version: Option<i64>,
+    pub completeness_status: Option<String>,
+    pub stock_count: Option<i64>,      // 新增
+    pub updated_at: String,
+}
+```
+
+然后更新 `list_trade_systems` 函数中的 SQL 查询，添加 stock count 子查询：
+
+```rust
+// 修改 list_trade_systems 的 SQL（约第15-28行），在 select 中加：
+// (select count(*) from trade_system_stocks tss where tss.trade_system_id = ts.id) as stock_count,
+```
+
+更新 row mapping 添加 `.get(6)?` 等调整列索引。
+
+接着在 `models/mod.rs` 的 `StockReview` 之后添加新结构体：
 
 ```rust
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -365,12 +393,25 @@ git commit -m "feat(commands): list/add/remove trade_system_stocks 命令 xb"
 - Modify: `src/lib/commands.ts`
 - Create: `src/lib/agentChat.ts`
 
-- [ ] **Step 1: types.ts 添加新类型**
+- [ ] **Step 1: types.ts 更新现有类型 + 添加新类型**
 
-在 `types.ts` 末尾添加：
+先更新 `TradeSystemSummary`，添加 `stockCount`：
 
 ```typescript
-export type TradeSystemStock = {
+// 找到 TradeSystemSummary（约第15行），添加 stockCount
+export type TradeSystemSummary = {
+  id: string
+  name: string
+  description?: string | null
+  activeVersionId?: string | null
+  activeVersion?: number | null
+  completenessStatus?: string | null
+  stockCount?: number | null    // 新增
+  updatedAt: string
+}
+```
+
+然后在 `types.ts` 末尾添加：
   id: string
   tradeSystemId: string
   symbol: string
@@ -502,7 +543,7 @@ function AgentCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold font-mono truncate">{system.name}</span>
-            <Badge>V{system.version ?? 1}</Badge>
+            <Badge>V{system.activeVersion ?? 1}</Badge>
           </div>
           {system.description && (
             <p className="text-xs text-muted-foreground mt-1 truncate">{system.description}</p>
@@ -954,7 +995,7 @@ export function AgentEditWindow({
     }
   }
 
-  const inputLabel = isNew ? `新建: ${system?.name ?? '...'}` : `${system?.name ?? ''} V${system?.version ?? 1}`
+  const inputLabel = isNew ? `新建: ${system?.name ?? '...'}` : `${system?.name ?? ''} V${system?.activeVersion ?? 1}`
 
   return (
     <div className="flex h-screen bg-background">
@@ -970,7 +1011,7 @@ export function AgentEditWindow({
       <div className="flex-1 flex flex-col">
         <div className="flex-1 overflow-auto p-3 space-y-3">
           <div className="text-xs text-muted-foreground">
-            🤖 {isNew ? '开始描述你的交易系统理念' : `当前系统：${system?.name ?? ''} V${system?.version ?? 1}`}
+            🤖 {isNew ? '开始描述你的交易系统理念' : `当前系统：${system?.name ?? ''} V${system?.activeVersion ?? 1}`}
           </div>
           {history.map((msg, i) => (
             <div key={i} className={msg.role === 'user' ? 'text-right' : ''}>
@@ -1005,7 +1046,7 @@ export function AgentEditWindow({
           </div>
           <div className="flex justify-end">
             <Button variant="primary" onClick={handlePublish}>
-              📄 {isNew ? '发布 V1' : `发布 V${(system?.version ?? 0) + 1}`}
+              📄 {isNew ? '发布 V1' : `发布 V${(system?.activeVersion ?? 0) + 1}`}
             </Button>
           </div>
         </div>
