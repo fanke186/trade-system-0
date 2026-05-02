@@ -5,7 +5,7 @@ Tauri 2 桌面应用，帮助用户构建个人交易系统并生成专属 AI Ag
 ## 核心红线
 
 - 交易系统 Markdown 是单一事实源（SSOT），Agent 只能按 Markdown 规则分析，不得自行补充。
-- K 线数据由 `market-sync`（独立项目，`~/data/market-sync/`）每日盘后自动同步到 `~/.data/duckdb/market/market.duckdb`。trade-system-0 通过 `refresh_from_market` 命令从该 DuckDB ATTACH 并物化到本地 `kline_bars`，不做网络请求。评分和图表只读查询本地 DuckDB，不得隐式下载数据。
+- K 线数据由 `market-sync`（独立项目，`~/data/market-sync/`）每日盘后自动同步到 `~/.data/duckdb/market/market.duckdb`。首次使用运行 `scripts/init_sync.sh` 初始化，后续通过 `refresh_from_market` 增量同步（只拉 `trade_date > last_kline_date` 的新数据）。评分和图表只读查询本地 DuckDB，不得隐式下载数据。
 - 支持日 K、周 K、月 K、季 K、年 K（1d/1w/1M/1Q/1Y），不接入分钟线、实时行情或交易执行。
 - 所有设计决策以当前项目代码和 `docs/architecture.md` 为准。
 

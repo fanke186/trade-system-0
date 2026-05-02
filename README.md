@@ -43,11 +43,11 @@ trade-system-0-data/
 - 交易系统 Markdown 版本管理、完整性检查、导出。
 - 材料导入和 `.md`、`.txt`、可提取文本 PDF 解析。
 - Model Provider 配置、活跃 Provider、OpenAI-compatible 调用。
-- Agent 编译和测试问答。
+- 交易系统Agents：三栏布局管理交易系统与关联标的，Chatbot 编辑窗口。
 - K 线同步（market-sync 自动仓 + refresh_from_market 一键补齐）、多周期本地只读查询。
 - 单股评分编排、数据不足前置阻断、LLM JSON 输出校验。
 - 我的自选（首页）：合并自选池与 K 线图表，三栏布局，含分组管理、排序、右键菜单、MA 均线、对数坐标、复权、画线吸附、十字光标详情。
-- 每日复盘编排：批量跑自选分组中所有股票的评分。
+- AI 评分：三种触发模式（交易系统agent/单只标的/自选分组），评分历史记录与 HTML 报告。
 - 全市场元数据同步：从 market-sync DuckDB 读取标的维度信息。
 - 证券检索：代码/名称模糊搜索，全列升降序排序，多选右键菜单（添加到分组/交易系统）。
 
