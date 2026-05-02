@@ -1,6 +1,7 @@
 pub mod agent_service;
 pub mod annotation_service;
 pub mod common;
+pub mod csv_import_service;
 pub mod kline_import_service;
 pub mod kline_query_service;
 pub mod kline_sync_service;

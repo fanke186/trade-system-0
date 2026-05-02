@@ -1,5 +1,8 @@
 use crate::app_state::AppState;
+use crate::models::KlineSyncResult;
+use crate::services::csv_import_service;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tauri::{Emitter, Manager, State};
 
 #[derive(Serialize)]
@@ -248,6 +251,38 @@ pub async fn sync_securities_metadata(
 
         Ok(total_upserted)
     }).await.map_err(|e| format!("Join error: {e}"))?;
+
+    result
+}
+
+#[tauri::command]
+pub async fn import_csv_data(
+    app: tauri::AppHandle,
+    _state: State<'_, AppState>,
+    dir_path: String,
+) -> Result<KlineSyncResult, String> {
+    let dir = PathBuf::from(&dir_path);
+    tracing::info!(dir = %dir.display(), "import_csv_data 命令被调用");
+
+    let _ = app.emit(
+        "kline-sync-progress",
+        serde_json::json!({ "stockCode": "", "status": "started", "percent": 0 }),
+    );
+
+    let app_handle = app.clone();
+    let d = dir.clone();
+    let result: Result<KlineSyncResult, String> = tokio::task::spawn_blocking(move || {
+        let app_state = app_handle.state::<AppState>();
+        let conn = app_state.duckdb.lock().map_err(|_| "DuckDB 锁被占用".to_string())?;
+        csv_import_service::import_csv_directory(&conn, &d).map_err(|e| e.message)
+    })
+    .await
+    .map_err(|e| format!("Join error: {e}"))?;
+
+    let _ = app.emit(
+        "kline-sync-progress",
+        serde_json::json!({ "stockCode": "", "status": "completed", "percent": 100 }),
+    );
 
     result
 }

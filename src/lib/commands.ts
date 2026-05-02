@@ -167,4 +167,7 @@ export const commands = {
 
   syncSecuritiesMetadata: () =>
     call<number>('sync_securities_metadata'),
+
+  importCsvData: (dirPath: string) =>
+    call<KlineSyncResult>('import_csv_data', { dirPath }),
 }

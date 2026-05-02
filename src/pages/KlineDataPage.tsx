@@ -24,10 +24,32 @@ function DataHealthBanner() {
     refetchInterval: 30000
   })
   const syncMutation = useMutation({
-    mutationFn: () => commands.syncKline('', 'incremental', 'incomplete'),
-    onSuccess: () => {
+    mutationFn: () => {
+      console.log('[sync] invoking sync_kline')
+      return commands.syncKline('', 'incremental', 'incomplete')
+    },
+    onSuccess: (data) => {
+      console.log('[sync] success:', data)
       void queryClient.invalidateQueries({ queryKey: ['data-health'] })
       void queryClient.invalidateQueries({ queryKey: ['securities'] })
+    },
+    onError: (err) => {
+      console.error('[sync] error:', err)
+    }
+  })
+
+  const importCsv = useMutation({
+    mutationFn: (dir: string) => {
+      console.log('[csv] invoking import_csv_data', dir)
+      return commands.importCsvData(dir)
+    },
+    onSuccess: (data) => {
+      console.log('[csv] success:', data)
+      void queryClient.invalidateQueries({ queryKey: ['data-health'] })
+      void queryClient.invalidateQueries({ queryKey: ['securities'] })
+    },
+    onError: (err) => {
+      console.error('[csv] error:', err)
     }
   })
 
@@ -68,6 +90,17 @@ function DataHealthBanner() {
             onClick={() => syncMutation.mutate()}
           >
             {syncMutation.isPending ? '补齐中' : '一键补齐'}
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              const dir = '/Users/yaya/me/ai-reference/stocks'
+              console.log('[csv] importing from:', dir)
+              importCsv.mutate(dir)
+            }}
+            disabled={importCsv.isPending}
+          >
+            {importCsv.isPending ? '导入中' : 'CSV 导入'}
           </Button>
         </>
       ) : (

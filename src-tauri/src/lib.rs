@@ -65,6 +65,7 @@ pub fn run() {
             commands::data_ops::search_securities,
             commands::data_ops::get_data_health,
             commands::data_ops::sync_securities_metadata,
+            commands::data_ops::import_csv_data,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run trade-system-0");
