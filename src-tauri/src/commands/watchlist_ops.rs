@@ -25,6 +25,16 @@ pub fn move_watchlist_item(
 }
 
 #[tauri::command]
+pub fn copy_watchlist_item(
+    state: State<'_, AppState>,
+    item_id: String,
+    target_watchlist_id: String,
+) -> AppResult<OkResult> {
+    let conn = state.sqlite.lock().expect("sqlite lock");
+    watchlist_service::copy_watchlist_item(&conn, &item_id, &target_watchlist_id)
+}
+
+#[tauri::command]
 pub fn create_watchlist_group(
     state: State<'_, AppState>,
     name: String,

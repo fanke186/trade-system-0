@@ -2,6 +2,7 @@ use crate::app_state::AppState;
 use crate::db::duckdb::DuckConnection;
 use crate::error::AppResult;
 use crate::models::StockMeta;
+use crate::services::kline_query_service::resolve_symbol;
 use chrono::{Datelike, NaiveDate, Weekday};
 use duckdb::OptionalExt;
 use tauri::State;
@@ -9,25 +10,28 @@ use tauri::State;
 #[tauri::command]
 pub fn get_stock_meta(state: State<'_, AppState>, code: String) -> AppResult<StockMeta> {
     let duck = state.duckdb.lock().expect("duckdb lock");
+    let symbol = resolve_symbol(&duck, &code)?;
 
     // Query security info from DuckDB securities table
     let mut stmt = duck.prepare(
         r#"
-        select symbol_id, code, name, exchange, board, cast(list_date as varchar), status
+        select symbol, code, name, exchange, board, industry, coalesce(stock_type, 'stock'), cast(list_date as varchar), status
           from securities
-         where code = ?1
+         where symbol = ?1
         "#,
     )?;
-    let (symbol_id, sec_code, name, exchange, board, list_date, status): (
-        i64,
+    let (sec_symbol, sec_code, name, exchange, board, industry, stock_type, list_date, status): (
+        String,
         String,
         String,
         String,
         Option<String>,
+        Option<String>,
+        String,
         Option<String>,
         String,
     ) = stmt
-        .query_row(duckdb::params![code], |row| {
+        .query_row(duckdb::params![symbol], |row| {
             Ok((
                 row.get(0)?,
                 row.get(1)?,
@@ -36,6 +40,8 @@ pub fn get_stock_meta(state: State<'_, AppState>, code: String) -> AppResult<Sto
                 row.get(4)?,
                 row.get(5)?,
                 row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
             ))
         })
         .optional()?
@@ -45,10 +51,13 @@ pub fn get_stock_meta(state: State<'_, AppState>, code: String) -> AppResult<Sto
 
     if status != "active" {
         return Ok(StockMeta {
+            symbol: sec_symbol,
             code: sec_code,
             name,
             exchange,
             board,
+            industry,
+            stock_type,
             list_date,
             latest_price: None,
             pre_close: None,
@@ -59,8 +68,8 @@ pub fn get_stock_meta(state: State<'_, AppState>, code: String) -> AppResult<Sto
         });
     }
 
-    // Query latest bar from bars_1d
-    let latest = query_latest_bar(&duck, symbol_id)?;
+    // Query latest unadjusted daily bar
+    let latest = query_latest_bar(&duck, &sec_symbol)?;
 
     let (latest_price, pre_close_val, change, change_pct, latest_date, stale) =
         if let Some((close, pre_close, trade_date)) = latest {
@@ -84,10 +93,13 @@ pub fn get_stock_meta(state: State<'_, AppState>, code: String) -> AppResult<Sto
         };
 
     Ok(StockMeta {
+        symbol: sec_symbol,
         code: sec_code,
         name,
         exchange,
         board,
+        industry,
+        stock_type,
         list_date,
         latest_price,
         pre_close: pre_close_val,
@@ -100,19 +112,19 @@ pub fn get_stock_meta(state: State<'_, AppState>, code: String) -> AppResult<Sto
 
 fn query_latest_bar(
     conn: &DuckConnection,
-    symbol_id: i64,
+    symbol: &str,
 ) -> AppResult<Option<(f64, f64, String)>> {
     let mut stmt = conn.prepare(
         r#"
         select close, pre_close, cast(trade_date as varchar)
-          from bars_1d
-         where symbol_id = ?1 and pre_close is not null
+          from kline_bars
+         where symbol = ?1 and period = '1d' and adj_mode = 'none' and pre_close is not null
          order by trade_date desc
          limit 1
         "#,
     )?;
     let result = stmt
-        .query_row(duckdb::params![symbol_id], |row| {
+        .query_row(duckdb::params![symbol], |row| {
             Ok((row.get::<_, f64>(0)?, row.get::<_, f64>(1)?, row.get::<_, String>(2)?))
         })
         .optional()?;

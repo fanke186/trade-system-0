@@ -120,6 +120,35 @@ pub fn move_watchlist_item(
     Ok(OkResult { ok: true })
 }
 
+pub fn copy_watchlist_item(
+    conn: &Connection,
+    item_id: &str,
+    target_watchlist_id: &str,
+) -> AppResult<OkResult> {
+    let stock_code: String = conn.query_row(
+        "select stock_code from watchlist_items where id = ?1",
+        params![item_id],
+        |row| row.get(0),
+    )?;
+    let now = now_iso();
+    let id = new_id("wli");
+    let sort_order: i64 = conn.query_row(
+        "select coalesce(max(sort_order), 0) + 1 from watchlist_items where watchlist_id = ?1",
+        params![target_watchlist_id],
+        |row| row.get(0),
+    )?;
+    conn.execute(
+        r#"
+        insert into watchlist_items
+          (id, watchlist_id, stock_code, local_status, note, sort_order, created_at, updated_at)
+        values (?1, ?2, ?3, 'watch', null, ?4, ?5, ?5)
+        on conflict(watchlist_id, stock_code) do update set updated_at = excluded.updated_at
+        "#,
+        params![id, target_watchlist_id, stock_code, sort_order, now],
+    )?;
+    Ok(OkResult { ok: true })
+}
+
 pub fn create_watchlist_group(conn: &Connection, name: &str) -> AppResult<Watchlist> {
     let now = now_iso();
     let id = new_id("wl");
@@ -143,7 +172,7 @@ pub fn delete_watchlist_group(conn: &Connection, watchlist_id: &str) -> AppResul
         params![watchlist_id],
         |row| row.get(0),
     )?;
-    if name == "我的自选" {
+    if name == "我的自选" || name == "默认自选" {
         return Err(AppError::new(
             "protected",
             "不能删除默认自选股分组",

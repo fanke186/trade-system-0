@@ -144,6 +144,9 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
 
         insert or ignore into schema_migrations (id, applied_at)
         values ('0001_initial_sqlite', datetime('now'));
+
+        update watchlists set name = '我的自选', updated_at = datetime('now')
+         where id = 'wl_default' and name in ('默认自选', '自选股票池');
         "#,
     )?;
 
@@ -154,7 +157,7 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
 
 fn seed_defaults(conn: &Connection) -> AppResult<()> {
     conn.execute(
-        "insert or ignore into watchlists (id, name, created_at, updated_at) values ('wl_default', '默认自选', datetime('now'), datetime('now'))",
+        "insert or ignore into watchlists (id, name, created_at, updated_at) values ('wl_default', '我的自选', datetime('now'), datetime('now'))",
         [],
     )?;
     for (code, name, exchange) in [

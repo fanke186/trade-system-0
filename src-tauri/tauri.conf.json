@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "trade-system-0",
+  "productName": "QSGG",
   "version": "0.1.0",
   "identifier": "com.local.tradesystem0",
   "build": {
@@ -12,11 +12,12 @@
   "app": {
     "windows": [
       {
-        "title": "trade-system-0",
+        "title": "QSGG",
         "width": 1600,
         "height": 1000,
         "minWidth": 1180,
         "minHeight": 760,
+        "decorations": false,
         "titleBarStyle": "Overlay"
       }
     ],

@@ -5,6 +5,7 @@ use tauri::{Emitter, Manager, State};
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecuritySearchResult {
+    pub symbol: String,
     pub code: String,
     pub name: String,
     pub market_type: Option<String>,
@@ -22,19 +23,20 @@ pub async fn search_securities(
     let pattern = format!("%{}%", keyword);
     let mut stmt = db
         .prepare(
-            "SELECT code, name, market_type, stock_type FROM securities
-             WHERE (code LIKE ?1 OR name LIKE ?2) AND status = 'active'
-             ORDER BY CASE WHEN code LIKE ?1 THEN 0 ELSE 1 END, code
+            "SELECT symbol, code, name, market_type, stock_type FROM securities
+             WHERE (symbol LIKE ?1 OR code LIKE ?1 OR name LIKE ?2) AND status = 'active'
+             ORDER BY CASE WHEN symbol LIKE ?1 THEN 0 WHEN code LIKE ?1 THEN 1 ELSE 2 END, code, exchange
              LIMIT ?3",
         )
         .map_err(|e| e.to_string())?;
     let results: Vec<SecuritySearchResult> = stmt
         .query_map(duckdb::params![pattern, pattern, limit as i64], |row| {
             Ok(SecuritySearchResult {
-                code: row.get(0)?,
-                name: row.get(1)?,
-                market_type: row.get(2)?,
-                stock_type: row.get(3)?,
+                symbol: row.get(0)?,
+                code: row.get(1)?,
+                name: row.get(2)?,
+                market_type: row.get(3)?,
+                stock_type: row.get(4)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -76,13 +78,13 @@ pub async fn get_data_health(
         .unwrap_or(0);
 
     let latest_date: Option<String> = db
-        .query_row("SELECT MAX(trade_date) FROM bars_1d", [], |r| r.get(0))
+        .query_row("SELECT cast(MAX(trade_date) as varchar) FROM kline_bars WHERE period = '1d' AND adj_mode = 'none'", [], |r| r.get(0))
         .ok();
 
     let complete: i64 = if let Some(ref d) = latest_date {
         db.query_row(
-            "SELECT COUNT(DISTINCT b.symbol_id) FROM bars_1d b
-             INNER JOIN securities s ON s.symbol_id = b.symbol_id
+            "SELECT COUNT(DISTINCT b.symbol) FROM kline_bars b
+             INNER JOIN securities s ON s.symbol = b.symbol
              WHERE s.stock_type='stock' AND s.status='active' AND b.trade_date = ?1",
             [d.as_str()],
             |r| r.get(0),
@@ -109,9 +111,12 @@ pub async fn get_data_health(
     let mut stmt = db
         .prepare(
             "SELECT COALESCE(s.market_type,'未知'), COUNT(*),
-                    COUNT(DISTINCT CASE WHEN b.symbol_id IS NOT NULL THEN s.symbol_id END)
+                    COUNT(DISTINCT CASE WHEN b.symbol IS NOT NULL THEN s.symbol END)
              FROM securities s
-             LEFT JOIN bars_1d b ON s.symbol_id = b.symbol_id AND b.trade_date = (SELECT MAX(trade_date) FROM bars_1d)
+             LEFT JOIN kline_bars b ON s.symbol = b.symbol
+                  AND b.period = '1d'
+                  AND b.adj_mode = 'none'
+                  AND b.trade_date = (SELECT MAX(trade_date) FROM kline_bars WHERE period = '1d' AND adj_mode = 'none')
              WHERE s.stock_type='stock' AND s.status='active'
              GROUP BY s.market_type ORDER BY COUNT(*) DESC",
         )
@@ -177,8 +182,6 @@ pub async fn sync_securities_metadata(
             .map_err(|e| format!("Client build: {e}"))?;
 
         let mut total_upserted = 0i64;
-        let mut max_symbol_id: i64 = 0;
-
         for page in 1..=3i32 {
             let url = format!(
                 "https://push2.eastmoney.com/api/qt/clist/get?pn={page}&pz=5000&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f2,f3,f4,f12,f13,f14,f100"
@@ -196,27 +199,40 @@ pub async fn sync_securities_metadata(
             };
             if items.is_empty() { break; }
 
-            let rows: Vec<(i64, String, String, String, String, Option<String>)> = items.iter()
+            let rows: Vec<(String, String, String, String, String, Option<String>)> = items.iter()
                 .filter(|item| !item.code.starts_with('9') && item.code.len() <= 6)
                 .map(|item| {
-                    max_symbol_id += 1;
                     let exchange = if item.market == 1 { "SH" } else { "SZ" };
                     let market_type = if item.code.starts_with("688") { "科创板" }
                         else if item.code.starts_with("300") || item.code.starts_with("301") { "创业板" }
                         else if item.code.starts_with("8") || item.code.starts_with("4") { "北交所" }
                         else { "主板" };
-                    (max_symbol_id, item.code.clone(), item.name.clone(), exchange.to_string(), market_type.to_string(), item.industry.clone())
+                    (
+                        format!("{}.{}", item.code, exchange),
+                        item.code.clone(),
+                        item.name.clone(),
+                        exchange.to_string(),
+                        market_type.to_string(),
+                        item.industry.clone(),
+                    )
                 })
                 .collect();
 
             {
                 let app_state = app_handle.state::<AppState>();
                 let db = app_state.duckdb.lock().map_err(|_| "lock poisoned".to_string())?;
-                for (id, code, name, exchange, market_type, industry) in &rows {
+                for (symbol, code, name, exchange, market_type, industry) in &rows {
                     db.execute(
-                        "insert or replace into securities (symbol_id, code, name, exchange, board, market_type, stock_type, industry, status)
-                         values (?1, ?2, ?3, ?4, ?5, ?6, 'stock', ?7, 'active')",
-                        duckdb::params![id, code, name, exchange, market_type, market_type, industry],
+                        "insert into securities (symbol, code, name, exchange, board, market_type, stock_type, industry, status, updated_at)
+                         values (?1, ?2, ?3, ?4, ?5, ?6, 'stock', ?7, 'active', current_timestamp)
+                         on conflict(symbol) do update set
+                           name = excluded.name,
+                           board = coalesce(excluded.board, securities.board),
+                           market_type = coalesce(excluded.market_type, securities.market_type),
+                           industry = coalesce(excluded.industry, securities.industry),
+                           status = excluded.status,
+                           updated_at = current_timestamp",
+                        duckdb::params![symbol, code, name, exchange, market_type, market_type, industry],
                     ).ok();
                 }
             }
