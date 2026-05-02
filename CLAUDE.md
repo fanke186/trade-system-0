@@ -5,7 +5,7 @@ Tauri 2 桌面应用，帮助用户构建个人交易系统并生成专属 AI Ag
 ## 核心红线
 
 - 交易系统 Markdown 是单一事实源（SSOT），Agent 只能按 Markdown 规则分析，不得自行补充。
-- K 线必须先通过 `sync_kline`（Python 脚本 + TickFlow）写入本地 DuckDB，再供评分和图表只读查询。评分和图表不得隐式下载数据。
+- K 线必须先通过 `sync_kline`（Python 脚本 + TickFlow）或 CSV 本地导入（`import_csv_data`）写入本地 DuckDB，再供评分和图表只读查询。评分和图表不得隐式下载数据。
 - 支持日 K、周 K、月 K、季 K、年 K（1d/1w/1M/1Q/1Y），不接入分钟线、实时行情或交易执行。
 - 所有设计决策以当前项目代码和 `docs/architecture.md` 为准。
 
@@ -43,7 +43,7 @@ src/                         # React + TypeScript 前端
 src/components/chart/        # K 线图表、工具栏、设置面板
 src/components/watchlist/    # 自选侧栏、股票信息面板
 src-tauri/src/commands/      # Tauri command IPC 层
-src-tauri/src/services/      # 业务编排层（含 kline_import_service）
+src-tauri/src/services/      # 业务编排层（含 kline_import_service、csv_import_service）
 src-tauri/src/db/            # SQLite 应用状态 + DuckDB K 线
 src-tauri/src/llm/           # OpenAI-compatible 客户端、Prompt、JSON guard
 src-tauri/src/models/        # 数据模型
@@ -54,6 +54,7 @@ scripts/                     # Python 脚本（sync_kline.py 等）
 
 ```
 sync_kline (Python 脚本) -> TickFlow API -> Parquet -> DuckDB kline_bars
+import_csv_data (Rust) -> 本地 CSV 日K文件 -> pre_close/change/amplitude 计算 -> DuckDB kline_bars
 get_bars   -> DuckDB only（只读，不触发下载）
 get_stock_meta -> securities (DuckDB) + kline_bars (DuckDB) -> 最新价/涨跌/陈旧检测
 score_stock -> coverage check -> get_bars -> LLM -> stock_reviews
@@ -74,3 +75,5 @@ cd src-tauri && cargo test         # Rust 测试
 - `docs/reference/trend-trader/` 目录存放 trend-trader 项目的原始设计文档，**不是当前系统的设计文档**，仅供参考。该目录下的 README.md 有详细说明。
 - `docs/superpowers/specs/2026-05-01-my-watchlist-design.md` — **我的自选**功能设计文档。
 - `docs/superpowers/specs/2026-05-01-ui-redesign-design.md` — UI 重设计规范文档。
+- `.claude/skills/ao-workflow-runner/` — AO 多 Agent 编排 skill，输入 `ao，<需求>` 自动编排。
+- `~/.claude/agents/` — 211 个 AI 专家角色（agency-agents-zh），`/agents` 查看。

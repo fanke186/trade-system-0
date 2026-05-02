@@ -7,17 +7,21 @@
   - `components/chart/` — K线图表、工具栏、设置面板、悬浮详情。
   - `components/watchlist/` — 自选侧栏（分组/排序/右键菜单）、股票信息面板。
 - `src-tauri/src/commands/`：Tauri command IPC 层（含 `stock_meta`、`watchlist_ops` 等命令）。
-- `src-tauri/src/services/`：业务编排层（含 `kline_import_service` 负责 Parquet→DuckDB 导入）。
+- `src-tauri/src/services/`：业务编排层（含 `kline_import_service` 负责 Parquet→DuckDB 导入，`csv_import_service` 负责 CSV→DuckDB 直接导入）。
 - `src-tauri/src/db/`：SQLite、DuckDB 连接与迁移。
 - `src-tauri/src/llm/`：OpenAI-compatible 客户端、Prompt、JSON guard。
 - `scripts/sync_kline.py`：Python 同步脚本，通过 TickFlow SDK 批量拉取 A 股+指数 K 线，输出 Parquet。
 
-K 线数据源为 TickFlow（免费 tier `https://free-api.tickflow.org`），Python 脚本负责全量/增量同步、限流重试、进度上报。
+K 线数据源支持两种方式：
+
+1. **TickFlow API**（免费 tier `https://free-api.tickflow.org`）：Python 脚本 `sync_kline.py` 负责全量/增量同步、限流重试、进度上报，输出 Parquet。
+2. **本地 CSV 导入**（`import_csv_data` 命令）：Rust 端直接读取 `{code}_{name}_日K线历史.csv` 文件，自动计算 `pre_close`/`change`/`change_pct`/`amplitude`，批量写入 DuckDB。适用场景为已有离线 K 线数据、网络不稳定时快速导入。
 
 评分与图表读取链路：
 
 ```text
 sync_kline (Python 脚本) -> TickFlow HTTP API -> Parquet -> kline_bars (DuckDB)
+import_csv_data (Rust) -> 本地 CSV 日K文件 -> 衍生字段计算 -> kline_bars (DuckDB)
 get_bars      -> DuckDB only（含复权参数 adj: pre|post|none）
 sync_securities_metadata -> eastmoney API -> securities (DuckDB, ~5000只A股)
 get_stock_meta -> securities (DuckDB) + kline_bars (DuckDB) -> 最新价/涨跌/陈旧检测

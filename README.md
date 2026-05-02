@@ -44,7 +44,7 @@ trade-system-0-data/
 - 材料导入和 `.md`、`.txt`、可提取文本 PDF 解析。
 - Model Provider 配置、活跃 Provider、OpenAI-compatible 调用。
 - Agent 编译和测试问答。
-- K 线同步（Python 脚本 + TickFlow SDK）、多周期本地只读查询。
+- K 线同步（Python 脚本 + TickFlow SDK / 本地 CSV 导入）、多周期本地只读查询。
 - 单股评分编排、数据不足前置阻断、LLM JSON 输出校验。
 - 我的自选（首页）：合并自选池与 K 线图表，三栏布局，含分组管理、排序、右键菜单、MA 均线、对数坐标、复权、画线吸附、十字光标详情。
 - 每日复盘编排：批量跑自选分组中所有股票的评分。
@@ -57,5 +57,7 @@ trade-system-0-data/
 | `docs/architecture.md` | 系统架构与模块边界 |
 | `docs/trading-system-template.md` | 通用交易系统模板（三层13章骨架），AI Agent 据此引导用户构建交易系统 |
 | `docs/reference/trend-trader/` | trend-trader 参考文档（只读，非当前系统设计） |
-| `.claude/skills/` | 项目级 Claude Code 自定义 skill |
+| `.claude/skills/ao-workflow-runner/` | AO 多 Agent 编排 skill（输入 `ao，<需求>`） |
+| `~/.claude/agents/` | 211 个 AI 专家角色（agency-agents-zh） |
+| `workflows/` | AO 工作流模板（写作/评审/小红书/抖音/投资分析等 26 个） |
 
