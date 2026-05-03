@@ -171,9 +171,10 @@ export const commands = {
   renameWatchlistGroup: (watchlistId: string, newName: string) =>
     call<OkResult>('rename_watchlist_group', { watchlistId, newName }),
 
-  listChartAnnotations: (stockCode: string, tradeSystemVersionId?: string | null) =>
+  listChartAnnotations: (stockCode: string, period?: string | null, tradeSystemVersionId?: string | null) =>
     call<ChartAnnotation[]>('list_chart_annotations', {
       stockCode,
+      period,
       tradeSystemVersionId
     }),
   saveChartAnnotation: (

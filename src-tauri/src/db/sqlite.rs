@@ -212,6 +212,7 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
     )?;
 
     migrate_trade_system_agents(conn)?;
+    migrate_chart_annotations_period(conn)?;
     seed_defaults(conn)?;
     tracing::info!("SQLite 建表迁移完成");
     Ok(())
@@ -311,6 +312,24 @@ fn table_has_column(conn: &Connection, table: &str, column: &str) -> AppResult<b
         }
     }
     Ok(false)
+}
+
+fn migrate_chart_annotations_period(conn: &Connection) -> AppResult<()> {
+    if !table_has_column(conn, "chart_annotations", "period")? {
+        conn.execute(
+            "alter table chart_annotations add column period text",
+            [],
+        )?;
+        conn.execute(
+            "update chart_annotations set period = '1d' where period is null and source = 'user'",
+            [],
+        )?;
+    }
+    conn.execute(
+        "create index if not exists idx_chart_annotations_scope on chart_annotations(stock_code, period, trade_system_version_id, created_at)",
+        [],
+    )?;
+    Ok(())
 }
 
 fn seed_defaults(conn: &Connection) -> AppResult<()> {

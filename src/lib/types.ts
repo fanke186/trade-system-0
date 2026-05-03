@@ -347,6 +347,7 @@ export type AiScoreRecord = {
 export type ChartAnnotation = {
   id: string
   stockCode: string
+  period?: '1d' | '1w' | '1M' | '1Q' | '1Y' | null
   tradeSystemVersionId?: string | null
   reviewId?: string | null
   source: 'user' | 'agent'
@@ -356,6 +357,8 @@ export type ChartAnnotation = {
   updatedAt: string
 }
 
+export type SnapTarget = 'open' | 'high' | 'low' | 'close'
+
 export type ChartAnnotationPayload =
   | {
       type: 'horizontal_line'
@@ -363,14 +366,15 @@ export type ChartAnnotationPayload =
       label?: string
       reason?: string
       color?: string
+      snappedTo?: SnapTarget
     }
   | {
       type: 'ray'
-      start: { date: string; price: number }
-      end: { date: string; price: number }
+      start: { date: string; price: number; snappedTo?: SnapTarget }
+      end: { date: string; price: number; snappedTo?: SnapTarget }
       label?: string
       reason?: string
-      snappedTo?: 'high' | 'low'
+      snappedTo?: SnapTarget
       color?: string
     }
 

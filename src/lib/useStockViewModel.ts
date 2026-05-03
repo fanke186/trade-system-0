@@ -49,8 +49,8 @@ export function useStockViewModel({
         enabled,
       },
       {
-        queryKey: ['annotations', symbol, versionId],
-        queryFn: () => commands.listChartAnnotations(symbol, versionId),
+        queryKey: ['annotations', symbol, frequency, versionId],
+        queryFn: () => commands.listChartAnnotations(symbol, frequency, versionId),
         enabled,
       },
       {

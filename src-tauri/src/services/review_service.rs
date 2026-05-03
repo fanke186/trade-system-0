@@ -102,6 +102,7 @@ pub async fn score_stock(
         let annotations = annotation_service::list_chart_annotations(
             &sqlite,
             &normalized_stock_code,
+            None,
             Some(version.id.clone()),
         )?;
         let provider = if let Some(provider_id) = provider_id {
@@ -366,6 +367,7 @@ fn persist_review(
                     crate::models::SaveChartAnnotationInput {
                         id: None,
                         stock_code: stock_code.to_string(),
+                        period: None,
                         trade_system_version_id: Some(trade_system_version_id.to_string()),
                         review_id: Some(review_id.clone()),
                         source: Some("agent".to_string()),

@@ -401,6 +401,7 @@ pub struct AiScoreRecord {
 pub struct ChartAnnotation {
     pub id: String,
     pub stock_code: String,
+    pub period: Option<String>,
     pub trade_system_version_id: Option<String>,
     pub review_id: Option<String>,
     pub source: String,
@@ -415,6 +416,7 @@ pub struct ChartAnnotation {
 pub struct SaveChartAnnotationInput {
     pub id: Option<String>,
     pub stock_code: String,
+    pub period: Option<String>,
     pub trade_system_version_id: Option<String>,
     pub review_id: Option<String>,
     pub source: Option<String>,

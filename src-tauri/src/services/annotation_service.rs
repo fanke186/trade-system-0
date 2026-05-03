@@ -6,16 +6,51 @@ use rusqlite::{params, Connection};
 pub fn list_chart_annotations(
     conn: &Connection,
     stock_code: &str,
+    period: Option<String>,
     trade_system_version_id: Option<String>,
 ) -> AppResult<Vec<ChartAnnotation>> {
     let mut values = Vec::new();
-    if let Some(version_id) = trade_system_version_id {
+    if let Some(ref period_val) = period {
+        if let Some(ref version_id) = trade_system_version_id {
+            let mut stmt = conn.prepare(
+                r#"
+                select id, stock_code, period, trade_system_version_id, review_id, source, annotation_type,
+                       payload_json, created_at, updated_at
+                  from chart_annotations
+                 where stock_code = ?1
+                   and (period = ?2 or (period is null and source = 'agent'))
+                   and (trade_system_version_id is null or trade_system_version_id = ?3)
+                 order by created_at asc
+                "#,
+            )?;
+            let rows = stmt.query_map(params![stock_code, period_val, version_id], annotation_from_row)?;
+            for row in rows {
+                values.push(row?);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                r#"
+                select id, stock_code, period, trade_system_version_id, review_id, source, annotation_type,
+                       payload_json, created_at, updated_at
+                  from chart_annotations
+                 where stock_code = ?1
+                   and (period = ?2 or (period is null and source = 'agent'))
+                 order by created_at asc
+                "#,
+            )?;
+            let rows = stmt.query_map(params![stock_code, period_val], annotation_from_row)?;
+            for row in rows {
+                values.push(row?);
+            }
+        }
+    } else if let Some(ref version_id) = trade_system_version_id {
         let mut stmt = conn.prepare(
             r#"
-            select id, stock_code, trade_system_version_id, review_id, source, annotation_type,
+            select id, stock_code, period, trade_system_version_id, review_id, source, annotation_type,
                    payload_json, created_at, updated_at
               from chart_annotations
-             where stock_code = ?1 and (trade_system_version_id is null or trade_system_version_id = ?2)
+             where stock_code = ?1
+               and (trade_system_version_id is null or trade_system_version_id = ?2)
              order by created_at asc
             "#,
         )?;
@@ -26,7 +61,7 @@ pub fn list_chart_annotations(
     } else {
         let mut stmt = conn.prepare(
             r#"
-            select id, stock_code, trade_system_version_id, review_id, source, annotation_type,
+            select id, stock_code, period, trade_system_version_id, review_id, source, annotation_type,
                    payload_json, created_at, updated_at
               from chart_annotations
              where stock_code = ?1
@@ -58,11 +93,12 @@ pub fn save_chart_annotation(
     conn.execute(
         r#"
         insert into chart_annotations
-          (id, stock_code, trade_system_version_id, review_id, source, annotation_type,
+          (id, stock_code, period, trade_system_version_id, review_id, source, annotation_type,
            payload_json, created_at, updated_at)
-        values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+        values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
         on conflict(id) do update set
           stock_code = excluded.stock_code,
+          period = excluded.period,
           trade_system_version_id = excluded.trade_system_version_id,
           review_id = excluded.review_id,
           source = excluded.source,
@@ -73,6 +109,7 @@ pub fn save_chart_annotation(
         params![
             id,
             input.stock_code,
+            input.period,
             input.trade_system_version_id,
             input.review_id,
             source,
@@ -95,7 +132,7 @@ pub fn delete_chart_annotation(conn: &Connection, annotation_id: &str) -> AppRes
 fn get_annotation(conn: &Connection, annotation_id: &str) -> AppResult<ChartAnnotation> {
     conn.query_row(
         r#"
-        select id, stock_code, trade_system_version_id, review_id, source, annotation_type,
+        select id, stock_code, period, trade_system_version_id, review_id, source, annotation_type,
                payload_json, created_at, updated_at
           from chart_annotations
          where id = ?1
@@ -107,16 +144,17 @@ fn get_annotation(conn: &Connection, annotation_id: &str) -> AppResult<ChartAnno
 }
 
 fn annotation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChartAnnotation> {
-    let payload_json: String = row.get(6)?;
+    let payload_json: String = row.get(7)?;
     Ok(ChartAnnotation {
         id: row.get(0)?,
         stock_code: row.get(1)?,
-        trade_system_version_id: row.get(2)?,
-        review_id: row.get(3)?,
-        source: row.get(4)?,
-        annotation_type: row.get(5)?,
+        period: row.get(2)?,
+        trade_system_version_id: row.get(3)?,
+        review_id: row.get(4)?,
+        source: row.get(5)?,
+        annotation_type: row.get(6)?,
         payload: serde_json::from_str(&payload_json).unwrap_or_else(|_| serde_json::json!({})),
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
     })
 }

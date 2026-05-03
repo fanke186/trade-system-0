@@ -9,6 +9,7 @@ use tauri::State;
 pub fn list_chart_annotations(
     state: State<'_, AppState>,
     stock_code: String,
+    period: Option<String>,
     trade_system_version_id: Option<String>,
 ) -> AppResult<Vec<ChartAnnotation>> {
     let stock_code = {
@@ -16,7 +17,7 @@ pub fn list_chart_annotations(
         resolve_symbol(&duck, &stock_code)?
     };
     let conn = state.sqlite.lock().expect("sqlite lock");
-    annotation_service::list_chart_annotations(&conn, &stock_code, trade_system_version_id)
+    annotation_service::list_chart_annotations(&conn, &stock_code, period, trade_system_version_id)
 }
 
 #[tauri::command]
