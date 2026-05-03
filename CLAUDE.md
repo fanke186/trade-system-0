@@ -43,6 +43,7 @@ Tauri 2 桌面应用，帮助用户构建个人交易系统并生成专属 AI Ag
 src/                         # React + TypeScript 前端
 src/components/chart/        # K 线图表、工具栏、设置面板、十字光标、画线悬浮栏、局部放大图
 src/components/layout/       # AppShell 全局布局、TitleBar 自定义窗口标题栏
+src/components/shared/       # Badge、Button、Panel、DataTable、ProviderTag 等共享组件
 src/components/trade-agents/ # 交易系统 Agent 列表、标的表格、评分面板、Chatbot 编辑窗口
 src/components/watchlist/    # 自选侧栏、股票信息面板
 src/lib/                     # 共享 hooks（useStockViewModel/useWatchlistViewModel）、命令封装、类型、工具
