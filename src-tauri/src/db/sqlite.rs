@@ -203,6 +203,40 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
           updated_at text not null
         );
 
+        create table if not exists agent_sessions (
+          id text primary key,
+          trade_system_id text,
+          trade_system_version_id text,
+          purpose text not null check(purpose in ('create_agent','expert_chat','score_report')),
+          title text,
+          summary text,
+          status text not null default 'active',
+          created_at text not null,
+          updated_at text not null
+        );
+
+        create table if not exists agent_messages (
+          id text primary key,
+          session_id text not null references agent_sessions(id),
+          role text not null check(role in ('user','assistant','system','tool')),
+          content text not null,
+          metadata_json text not null default '{}',
+          created_at text not null
+        );
+
+        create table if not exists agent_patch_proposals (
+          id text primary key,
+          session_id text references agent_sessions(id),
+          trade_system_id text,
+          trade_system_version_id text,
+          patch_json text not null,
+          status text not null check(status in ('pending','partially_accepted','accepted','rejected','failed')),
+          raw_llm_response text,
+          error_message text,
+          created_at text not null,
+          updated_at text not null
+        );
+
         insert or ignore into schema_migrations (id, applied_at)
         values ('0001_initial_sqlite', datetime('now'));
 
@@ -347,16 +381,16 @@ fn seed_defaults(conn: &Connection) -> AppResult<()> {
                enabled, is_active, extra_json, created_at, updated_at)
             values (
               'mp_deepseek_default',
-              'DeepSeek Pro',
+              'DeepSeek Flash',
               'deepseek',
               'https://api.deepseek.com',
               'env:DEEPSEEK_API_KEY',
-              'deepseek-v4-pro',
+              'deepseek-v4-flash',
               0.2,
               8192,
               1,
               1,
-              '{"requestOverrides":{"thinking":{"type":"enabled"},"reasoning_effort":"high"}}',
+              '{"requestOverrides":{"thinking":{"type":"disabled"}}}',
               datetime('now'),
               datetime('now')
             )

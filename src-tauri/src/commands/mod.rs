@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agent_patch;
 pub mod ai_score;
 pub mod annotation;
 pub mod data_ops;

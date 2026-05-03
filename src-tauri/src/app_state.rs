@@ -2,8 +2,10 @@ use crate::db::{duckdb, migrations, sqlite};
 use crate::error::AppResult;
 use crate::services::{model_provider_service, watchlist_service};
 use rusqlite::Connection as SqliteConnection;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use tokio::task::AbortHandle;
 
 pub struct AppState {
     pub app_dir: PathBuf,
@@ -11,6 +13,7 @@ pub struct AppState {
     pub duckdb: Mutex<duckdb::DuckConnection>,
     pub http: reqwest::Client,
     pub ai_score_worker_running: Mutex<bool>,
+    pub pending_llm_requests: Mutex<HashMap<String, AbortHandle>>,
 }
 
 impl AppState {
@@ -60,6 +63,7 @@ impl AppState {
             duckdb: Mutex::new(duckdb),
             http: reqwest::Client::new(),
             ai_score_worker_running: Mutex::new(false),
+            pending_llm_requests: Mutex::new(HashMap::new()),
         })
     }
 }

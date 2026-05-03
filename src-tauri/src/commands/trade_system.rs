@@ -52,6 +52,32 @@ pub async fn propose_trade_system_revision(
 }
 
 #[tauri::command]
+pub async fn propose_trade_system_revision_cancelable(
+    state: State<'_, AppState>,
+    request_id: String,
+    input: TradeSystemRevisionInput,
+) -> AppResult<TradeSystemRevisionProposal> {
+    trade_system_service::propose_revision_cancelable(&state, request_id, input).await
+}
+
+#[tauri::command]
+pub fn cancel_llm_request(
+    state: State<'_, AppState>,
+    request_id: String,
+) -> AppResult<OkResult> {
+    let handle = state
+        .pending_llm_requests
+        .lock()
+        .expect("pending llm lock")
+        .remove(&request_id);
+    if let Some(handle) = handle {
+        handle.abort();
+        tracing::info!(%request_id, "已中断 LLM 请求");
+    }
+    Ok(OkResult { ok: true })
+}
+
+#[tauri::command]
 pub fn check_trade_system_completeness(markdown: String) -> AppResult<CompletenessReport> {
     Ok(trade_system_service::check_completeness(&markdown))
 }

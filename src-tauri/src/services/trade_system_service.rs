@@ -3,9 +3,9 @@ use crate::db::duckdb::DuckConnection;
 use crate::error::{AppError, AppResult};
 use crate::llm::client::{call_model, ModelCallOptions};
 use crate::models::{
-    ChatMessage, CompletenessReport, ExportResult, OkResult, TradeSystemDetail, TradeSystemDraft,
-    TradeSystemRevisionInput, TradeSystemRevisionProposal, TradeSystemStock, TradeSystemSummary,
-    TradeSystemVersion,
+    ChatMessage, CompletenessReport, ExportResult, OkResult, RevisionPatch, RevisionPatchOp,
+    TradeSystemDetail, TradeSystemDraft, TradeSystemRevisionInput, TradeSystemRevisionProposal,
+    TradeSystemStock, TradeSystemSummary, TradeSystemVersion,
 };
 use crate::services::common::{new_id, now_iso, sha256_hex};
 use crate::services::kline_query_service::resolve_symbol;
@@ -445,6 +445,78 @@ pub async fn propose_revision(
     state: &AppState,
     input: TradeSystemRevisionInput,
 ) -> AppResult<TradeSystemRevisionProposal> {
+    propose_revision_inner(state, input).await
+}
+
+pub async fn propose_revision_cancelable(
+    state: &AppState,
+    request_id: String,
+    input: TradeSystemRevisionInput,
+) -> AppResult<TradeSystemRevisionProposal> {
+    // Extract all data needed by the spawned task before spawning
+    let provider = {
+        let conn = state.sqlite.lock().expect("sqlite lock");
+        get_active_provider(&conn)?.ok_or_else(|| {
+            AppError::new("provider_request_failed", "未配置活跃模型 Provider", true)
+        })?
+    };
+    let api_key = resolve_api_key(&state.app_dir, &provider)?;
+    let system_prompt = build_revision_system_prompt(&input.name, &input.current_markdown);
+    let mut messages = input.messages;
+    if messages.is_empty() {
+        messages.push(ChatMessage {
+            role: "user".to_string(),
+            content: "请检查当前交易系统草稿，并提出下一步需要补齐的问题。".to_string(),
+        });
+    }
+    let http = state.http.clone();
+    let current_markdown = input.current_markdown.clone();
+
+    let handle = tokio::spawn(async move {
+        let content = call_model(
+            &http,
+            &provider,
+            &api_key,
+            ModelCallOptions {
+                system_prompt,
+                messages,
+                response_format: Some("json_object".to_string()),
+                temperature: Some(provider.temperature),
+                max_tokens: Some(provider.max_tokens),
+            },
+        )
+        .await?;
+        let value = parse_revision_response(&content, &current_markdown)?;
+        revision_value_to_proposal(&value, &current_markdown)
+    });
+    {
+        state
+            .pending_llm_requests
+            .lock()
+            .expect("pending llm lock")
+            .insert(request_id.clone(), handle.abort_handle());
+    }
+    let result = handle.await.map_err(|_| {
+        AppError::new(
+            "llm_request_cancelled",
+            "已中断本次 AI 请求",
+            true,
+        )
+    })?;
+    {
+        state
+            .pending_llm_requests
+            .lock()
+            .expect("pending llm lock")
+            .remove(&request_id);
+    }
+    result
+}
+
+async fn propose_revision_inner(
+    state: &AppState,
+    input: TradeSystemRevisionInput,
+) -> AppResult<TradeSystemRevisionProposal> {
     let provider = {
         let conn = state.sqlite.lock().expect("sqlite lock");
         get_active_provider(&conn)?.ok_or_else(|| {
@@ -474,6 +546,115 @@ pub async fn propose_revision(
     )
     .await?;
     let value = parse_revision_response(&content, &input.current_markdown)?;
+    revision_value_to_proposal(&value, &input.current_markdown)
+}
+
+pub fn apply_revision_patch(current_markdown: &str, patch: &RevisionPatch) -> String {
+    let mut result = current_markdown.to_string();
+    for op in &patch.ops {
+        match op {
+            RevisionPatchOp::ReplaceSection { heading, content, .. } => {
+                result = replace_section(&result, heading, content);
+            }
+            RevisionPatchOp::AppendToSection { heading, content, .. } => {
+                result = append_to_section(&result, heading, content);
+            }
+            RevisionPatchOp::AskQuestion { .. } => {
+                // No markdown modification
+            }
+        }
+    }
+    result
+}
+
+fn replace_section(markdown: &str, heading: &str, content: &str) -> String {
+    let heading_trimmed = heading.trim();
+    let mut lines: Vec<&str> = markdown.lines().collect();
+    let mut start: Option<usize> = None;
+    let mut end: Option<usize> = None;
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed == heading_trimmed {
+            start = Some(i);
+        } else if start.is_some()
+            && (trimmed.starts_with("## ") || trimmed.starts_with("# "))
+            && i > start.unwrap()
+        {
+            end = Some(i);
+            break;
+        }
+    }
+
+    let start_idx = match start {
+        Some(i) => i,
+        None => return markdown.to_string(),
+    };
+    let end_idx = end.unwrap_or(lines.len());
+
+    let mut result: Vec<&str> = Vec::new();
+    result.extend_from_slice(&lines[..start_idx + 1]);
+    if !content.is_empty() {
+        result.push("");
+        for content_line in content.lines() {
+            result.push(content_line);
+        }
+        result.push("");
+    }
+    result.extend_from_slice(&lines[end_idx..]);
+    result.join("\n")
+}
+
+fn append_to_section(markdown: &str, heading: &str, content: &str) -> String {
+    let heading_trimmed = heading.trim();
+    let lines: Vec<&str> = markdown.lines().collect();
+    let mut next_section_idx: Option<usize> = None;
+    let mut found = false;
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed == heading_trimmed {
+            found = true;
+        } else if found
+            && (trimmed.starts_with("## ") || trimmed.starts_with("# "))
+        {
+            next_section_idx = Some(i);
+            break;
+        }
+    }
+
+    if !found {
+        return markdown.to_string();
+    }
+    let insert_idx = next_section_idx.unwrap_or(lines.len());
+
+    let mut result: Vec<&str> = Vec::new();
+    result.extend_from_slice(&lines[..insert_idx]);
+    result.push("");
+    for content_line in content.lines() {
+        result.push(content_line);
+    }
+    result.extend_from_slice(&lines[insert_idx..]);
+    result.join("\n")
+}
+
+fn revision_value_to_proposal(
+    value: &serde_json::Value,
+    current_markdown: &str,
+) -> AppResult<TradeSystemRevisionProposal> {
+    // Try RevisionPatch format first (has "ops" field)
+    if value.get("ops").and_then(|v| v.as_array()).is_some() {
+        if let Ok(patch) = serde_json::from_value::<RevisionPatch>(value.clone()) {
+            let new_markdown = apply_revision_patch(current_markdown, &patch);
+            return Ok(TradeSystemRevisionProposal {
+                assistant_message: patch.assistant_message,
+                markdown: new_markdown,
+                diff: patch.diff,
+                gap_questions: patch.gap_questions,
+            });
+        }
+    }
+    // Fall back to old format (has "markdown" field)
     Ok(TradeSystemRevisionProposal {
         assistant_message: value
             .get("assistantMessage")
@@ -484,7 +665,7 @@ pub async fn propose_revision(
         markdown: value
             .get("markdown")
             .and_then(|node| node.as_str())
-            .unwrap_or(&input.current_markdown)
+            .unwrap_or(current_markdown)
             .to_string(),
         diff: value
             .get("diff")
@@ -643,35 +824,67 @@ pub fn add_stocks(
 
 fn build_revision_system_prompt(name: &str, current_markdown: &str) -> String {
     let template = include_str!("../../../docs/trading-system-template.md");
+    let json_example = r###"
+{
+  "assistantMessage": "...",
+  "ops": [
+    {
+      "op": "replace_section",
+      "heading": "## 9. 评分规则",
+      "content": "...",
+      "reason": "..."
+    },
+    {
+      "op": "append_to_section",
+      "heading": "## 2. 目标与约束",
+      "content": "...",
+      "reason": "..."
+    },
+    {
+      "op": "ask_question",
+      "question": "...",
+      "severity": "blocking",
+      "reason": "..."
+    }
+  ],
+  "diff": "...",
+  "gapQuestions": ["..."]
+}
+"###;
     format!(
-        r#"你是 trade-system-0 的交易系统编辑 Agent。你的任务是用缺口问答的方式帮助用户把交易系统补齐到可评分、可复盘、可追溯。
+        r##"你是 trade-system-0 的交易系统编辑 Agent。你的任务是用缺口问答的方式帮助用户把交易系统补齐到可评分、可复盘、可追溯。
 
 工作规则：
 - 必须以仓库模板为准，不要发明模板外的核心结构。
 - 优先发现会阻止评分、风控或复盘的缺口，每次最多追问 3 个关键问题。
 - 如果用户已经给出足够信息，直接把信息整合进 Markdown。
-- 只返回 JSON 对象，不返回 Markdown 代码块。
-- JSON 必须包含 assistantMessage、markdown、diff、gapQuestions。
-- markdown 是完整交易系统 Markdown，不是片段；如果只需要追问或用户只是确认连通，可以保持原文不变。
-- 控制输出长度。不要为了复述模板而大段重写；只有用户给出明确新规则时才改对应段落。
+- 只输出 JSON 对象，不要 Markdown 代码块，不要 markdown 围栏。
+- 不要返回完整交易系统 Markdown。只返回需要修改的小段 section content。
+- 每次最多修改 3 个 section。如果用户输入很长，先总结和提问，不要大段重写。
+- content 只包含目标章节的新内容或追加内容，不是整章原文。
 - diff 用简短中文说明本轮改动或为什么暂不改。
+- heading 使用精确的 `## N. 名称` 格式匹配目标章节。
 
 交易系统名称：{name}
 
-模板：
+模板（13章骨架）：
 {template}
 
 当前 Markdown：
 {current_markdown}
 
-请严格输出如下 JSON 形状：
-{{
-  "assistantMessage": "面向用户的一段简短说明或追问",
-  "markdown": "完整 Markdown",
-  "diff": "本轮变更摘要",
-  "gapQuestions": ["问题1", "问题2"]
-}}
-"#
+请严格输出 RevisionPatch JSON 格式如下：
+{json_example}
+
+op 类型说明：
+- replace_section：替换指定 heading 的整个章节内容
+- append_to_section：追加到指定章节末尾
+- ask_question：不修改 Markdown，只是提问。severity 取 blocking / warning / nice_to_have
+"##,
+        name = name,
+        template = template,
+        current_markdown = current_markdown,
+        json_example = json_example,
     )
 }
 

@@ -1,3 +1,4 @@
+pub mod agent_patch_service;
 pub mod agent_service;
 pub mod ai_score_service;
 pub mod annotation_service;

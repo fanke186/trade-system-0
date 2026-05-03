@@ -98,6 +98,38 @@ pub struct TradeSystemRevisionProposal {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct RevisionPatch {
+    pub assistant_message: String,
+    pub ops: Vec<RevisionPatchOp>,
+    pub diff: String,
+    pub gap_questions: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "op", rename_all = "camelCase")]
+pub enum RevisionPatchOp {
+    #[serde(rename = "replace_section")]
+    ReplaceSection {
+        heading: String,
+        content: String,
+        reason: String,
+    },
+    #[serde(rename = "append_to_section")]
+    AppendToSection {
+        heading: String,
+        content: String,
+        reason: String,
+    },
+    #[serde(rename = "ask_question")]
+    AskQuestion {
+        question: String,
+        severity: String,
+        reason: String,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ExportResult {
     pub version_id: String,
     pub target_path: String,
@@ -447,4 +479,65 @@ pub struct StockMeta {
 #[serde(rename_all = "camelCase")]
 pub struct OkResult {
     pub ok: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSession {
+    pub id: String,
+    pub trade_system_id: Option<String>,
+    pub trade_system_version_id: Option<String>,
+    pub purpose: String,
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMessage {
+    pub id: String,
+    pub session_id: String,
+    pub role: String,
+    pub content: String,
+    pub metadata_json: Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPatchProposal {
+    pub id: String,
+    pub session_id: Option<String>,
+    pub trade_system_id: Option<String>,
+    pub trade_system_version_id: Option<String>,
+    pub patch_json: Value,
+    pub status: String,
+    pub raw_llm_response: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAgentPatchProposalInput {
+    pub id: Option<String>,
+    pub session_id: Option<String>,
+    pub trade_system_id: Option<String>,
+    pub trade_system_version_id: Option<String>,
+    pub patch_json: Value,
+    pub status: Option<String>,
+    pub raw_llm_response: Option<String>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptRejectOpsInput {
+    pub patch_proposal_id: String,
+    pub accepted_op_indexes: Vec<usize>,
+    pub edits: Option<Value>,
 }

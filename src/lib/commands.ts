@@ -52,6 +52,10 @@ export const commands = {
     }),
   proposeTradeSystemRevision: (input: TradeSystemRevisionInput) =>
     call<TradeSystemRevisionProposal>('propose_trade_system_revision', { input }),
+  proposeTradeSystemRevisionCancelable: (requestId: string, input: TradeSystemRevisionInput) =>
+    call<TradeSystemRevisionProposal>('propose_trade_system_revision_cancelable', { requestId, input }),
+  cancelLlmRequest: (requestId: string) =>
+    call<OkResult>('cancel_llm_request', { requestId }),
   checkTradeSystemCompleteness: (markdown: string) =>
     call<CompletenessReport>('check_trade_system_completeness', { markdown }),
   saveTradeSystemVersion: (
