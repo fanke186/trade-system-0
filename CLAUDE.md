@@ -15,7 +15,7 @@ Tauri 2 桌面应用，帮助用户构建个人交易系统并生成专属 AI Ag
 **方向：** 工业终端风 — 暗色、高对比、数据密度优先，每个像素都在传递信息。
 
 **配色：**
-- 背景 `#0d0d0d`（纯黑），面板 `#121212`，边框 `#2a2a2a`
+- 背景 `#0e0f15`（深灰蓝），面板 `#15161c`，边框 `#2d2f36`
 - 主题色/买入/成功 `#4d90fe`（蓝），卖出/危险 `#ff6b35`（橙红），观望 `#f0b93b`（琥珀）
 - CSS 变量统一定义在 `src/styles/index.css`，Tailwind 引用变量名
 
@@ -41,7 +41,8 @@ Tauri 2 桌面应用，帮助用户构建个人交易系统并生成专属 AI Ag
 
 ```
 src/                         # React + TypeScript 前端
-src/components/chart/        # K 线图表、工具栏、设置面板、十字光标
+src/components/chart/        # K 线图表、工具栏、设置面板、十字光标、画线悬浮栏、局部放大图
+src/components/layout/       # AppShell 全局布局、TitleBar 自定义窗口标题栏
 src/components/trade-agents/ # 交易系统 Agent 列表、标的表格、评分面板、Chatbot 编辑窗口
 src/components/watchlist/    # 自选侧栏、股票信息面板
 src/lib/                     # 共享 hooks（useStockViewModel/useWatchlistViewModel）、命令封装、类型、工具
