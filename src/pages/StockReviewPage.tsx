@@ -5,6 +5,7 @@ import { Button } from '../components/shared/Button'
 import { DataTable, Td } from '../components/shared/DataTable'
 import { Field, Input } from '../components/shared/Field'
 import { Panel } from '../components/shared/Panel'
+import { ProviderTag } from '../components/shared/ProviderTag'
 import { TradeSystemVersionSelect } from '../components/shared/Selectors'
 import { commands } from '../lib/commands'
 import { jsonPreview, toErrorMessage } from '../lib/format'
@@ -13,12 +14,14 @@ export function StockReviewPage({
   stockCode,
   selectedVersionId,
   onSelectVersion,
-  onStockCodeChange
+  onStockCodeChange,
+  onNavigateToSettings,
 }: {
   stockCode: string
   selectedVersionId?: string
   onSelectVersion: (versionId: string | undefined) => void
   onStockCodeChange: (code: string) => void
+  onNavigateToSettings?: () => void
 }) {
   const queryClient = useQueryClient()
   const reviewsQuery = useQuery({
@@ -60,6 +63,9 @@ export function StockReviewPage({
           <div className="flex items-end text-xs text-muted-foreground">
             评分前会检查本地 K 线覆盖；数据不足不会调用 LLM。
           </div>
+        </div>
+        <div className="mt-3">
+          <ProviderTag onSettingsClick={onNavigateToSettings} />
         </div>
         {scoreMutation.isError ? (
           <p className="mt-3 text-xs text-danger">{toErrorMessage(scoreMutation.error)}</p>

@@ -38,10 +38,15 @@ export function App() {
         onSelectVersion={setSelectedVersionId}
         stockCode={stockCode}
         onStockCodeChange={setStockCode}
+        onNavigateToSettings={() => setActivePage('settings')}
       />
     ),
     'trade-system-agents': (
-      <TradeSystemAgentsPage selectedVersionId={activeVersionId} onSelectVersion={setSelectedVersionId} />
+      <TradeSystemAgentsPage
+        selectedVersionId={activeVersionId}
+        onSelectVersion={setSelectedVersionId}
+        onNavigateToSettings={() => setActivePage('settings')}
+      />
     ),
     'stock-review': (
       <StockReviewPage
@@ -49,6 +54,7 @@ export function App() {
         onSelectVersion={setSelectedVersionId}
         stockCode={stockCode}
         onStockCodeChange={setStockCode}
+        onNavigateToSettings={() => setActivePage('settings')}
       />
     ),
     'my-watchlist': (

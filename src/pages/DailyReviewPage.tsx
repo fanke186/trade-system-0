@@ -8,6 +8,7 @@ import { DataTable, Td } from '../components/shared/DataTable'
 import { Field, Input, Select } from '../components/shared/Field'
 import { Panel } from '../components/shared/Panel'
 import { ProviderSelect, TradeSystemVersionSelect } from '../components/shared/Selectors'
+import { ProviderTag } from '../components/shared/ProviderTag'
 import { commands } from '../lib/commands'
 import { toErrorMessage } from '../lib/format'
 import { cn } from '../lib/cn'
@@ -25,12 +26,14 @@ export function DailyReviewPage({
   selectedVersionId,
   onSelectVersion,
   stockCode,
-  onStockCodeChange
+  onStockCodeChange,
+  onNavigateToSettings,
 }: {
   selectedVersionId?: string
   onSelectVersion: (versionId: string | undefined) => void
   stockCode: string
   onStockCodeChange: (code: string) => void
+  onNavigateToSettings?: () => void
 }) {
   const queryClient = useQueryClient()
   const [triggerType, setTriggerType] = useState<TriggerType>('trade_system_agent')
@@ -165,7 +168,8 @@ export function DailyReviewPage({
                 )
               })}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              <ProviderTag onSettingsClick={onNavigateToSettings} />
               <Badge tone={selectedVersionId ? 'success' : 'warning'}>{selectedSystem?.name ?? '未选择交易系统'}</Badge>
               <Badge tone={targetCount > 0 ? 'info' : 'warning'}>{targetCount} 标的</Badge>
             </div>

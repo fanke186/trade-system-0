@@ -13,10 +13,12 @@ type EditorTarget =
 
 export function TradeSystemAgentsPage({
   selectedVersionId,
-  onSelectVersion
+  onSelectVersion,
+  onNavigateToSettings,
 }: {
   selectedVersionId?: string
   onSelectVersion: (versionId: string | undefined) => void
+  onNavigateToSettings?: () => void
 }) {
   const queryClient = useQueryClient()
   const [selectedSystemId, setSelectedSystemId] = useState<string | undefined>()
@@ -142,6 +144,7 @@ export function TradeSystemAgentsPage({
         onClose={() => setEditorTarget(null)}
         onPublished={handlePublished}
         target={editorTarget}
+        onNavigateToSettings={onNavigateToSettings}
       />
 
       {systemsQuery.isError ? (

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Bot, Check, Loader2, Send, Sparkles, User, X } from 'lucide-react'
+import { Bot, Check, CircleStop, Loader2, Send, Sparkles, User, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '../shared/Button'
 import { Field, Input } from '../shared/Field'
 import { Badge } from '../shared/Badge'
+import { ProviderTag } from '../shared/ProviderTag'
 import { commands } from '../../lib/commands'
 import { sendChatMessage } from '../../lib/agentChat'
 import { toErrorMessage } from '../../lib/format'
@@ -24,12 +25,14 @@ export function AgentEditWindow({
   target,
   detail,
   onClose,
-  onPublished
+  onPublished,
+  onNavigateToSettings,
 }: {
   target: EditorTarget | null
   detail?: TradeSystemDetail
   onClose: () => void
   onPublished: (version: TradeSystemVersion) => void
+  onNavigateToSettings?: () => void
 }) {
   const open = Boolean(target)
   const isCreate = target?.mode === 'create'
@@ -104,6 +107,8 @@ export function AgentEditWindow({
     }
   })
 
+  const requestIdRef = useRef<string | null>(null)
+
   const chatMutation = useMutation({
     mutationFn: async () => {
       if (!target) throw new Error('编辑窗口未打开')
@@ -112,11 +117,14 @@ export function AgentEditWindow({
       const nextMessages = [...messages, { role: 'user' as const, content }]
       setMessages(nextMessages)
       setUserMessage('')
+      const rid = crypto.randomUUID()
+      requestIdRef.current = rid
       return sendChatMessage({
         mode: target.mode,
         name,
         history: nextMessages,
-        currentMarkdown: markdown
+        currentMarkdown: markdown,
+        requestId: rid,
       })
     },
     onSuccess: draft => {
@@ -132,13 +140,24 @@ export function AgentEditWindow({
       })
     },
     onError: error => {
+      const msg = toErrorMessage(error)
       setMessages(previous => [
         ...previous,
-        { role: 'assistant', content: `调用失败：${toErrorMessage(error)}` }
+        { role: 'assistant', content: msg.includes('cancelled') || msg.includes('中断') ? '已中断本次请求。' : `调用失败：${msg}` }
       ])
     }
   })
 
+  const handleCancel = () => {
+    const rid = requestIdRef.current
+    if (rid) {
+      commands.cancelLlmRequest(rid).catch(() => {})
+      requestIdRef.current = null
+    }
+    chatMutation.reset()
+  }
+
+  const isRunning = chatMutation.isPending
   const status = completenessQuery.data
 
   if (!open || !target) return null
@@ -256,22 +275,32 @@ export function AgentEditWindow({
               </div>
             </div>
 
-            <div className="grid grid-cols-[1fr_auto] gap-3 border-t border-border bg-background/35 p-4">
-              <Input
-                placeholder="输入你希望交易系统如何演进..."
-                value={userMessage}
-                onChange={event => setUserMessage(event.target.value)}
-                onKeyDown={event => {
-                  if (event.key === 'Enter' && !event.nativeEvent.isComposing) chatMutation.mutate()
-                }}
-              />
-              <Button
-                disabled={chatMutation.isPending || !userMessage.trim()}
-                icon={<Send className="h-4 w-4" />}
-                onClick={() => chatMutation.mutate()}
-              >
-                发送
-              </Button>
+            <div className="border-t border-border bg-background/35 p-4">
+              <div className="mb-2">
+                <ProviderTag onSettingsClick={onNavigateToSettings} />
+              </div>
+              <div className="grid grid-cols-[1fr_auto] gap-3">
+                <Input
+                  disabled={isRunning}
+                  placeholder={isRunning ? 'AI 正在回复...' : '输入你希望交易系统如何演进...'}
+                  value={userMessage}
+                  onChange={event => setUserMessage(event.target.value)}
+                  onKeyDown={event => {
+                    if (isRunning) return
+                    if (event.key === 'Enter' && !event.nativeEvent.isComposing) chatMutation.mutate()
+                  }}
+                />
+                <Button
+                  disabled={!isRunning && !userMessage.trim()}
+                  icon={isRunning ? <CircleStop className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+                  onClick={() => {
+                    if (isRunning) handleCancel()
+                    else chatMutation.mutate()
+                  }}
+                >
+                  {isRunning ? '中断' : '发送'}
+                </Button>
+              </div>
             </div>
           </section>
         </div>
