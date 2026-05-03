@@ -4,14 +4,14 @@
 
 :root {
   color-scheme: dark;
-  --background: 0 0% 5%;
-  --foreground: 0 0% 93%;
-  --panel: 0 0% 7%;
-  --panel-foreground: 0 0% 93%;
-  --muted: 0 0% 12%;
-  --muted-foreground: 0 0% 53%;
-  --border: 0 0% 16%;
-  --input: 0 0% 16%;
+  --background: 220 20% 7%;
+  --foreground: 220 15% 93%;
+  --panel: 220 18% 10%;
+  --panel-foreground: 220 15% 93%;
+  --muted: 220 14% 15%;
+  --muted-foreground: 220 10% 55%;
+  --border: 220 12% 20%;
+  --input: 220 12% 20%;
   --ring: 217 91% 64%;
   --success: 158 83% 34%;
   --warning: 41 90% 56%;

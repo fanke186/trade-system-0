@@ -1,10 +1,11 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useCallback } from 'react'
 import { Cpu, Settings } from 'lucide-react'
 import appIcon from '../../assets/qsgg-transparent.png'
 import { routes, type PageId } from '../../app/routes'
 import type { ModelProvider, TradeSystemSummary } from '../../lib/types'
 import { cn } from '../../lib/cn'
 import { Badge } from '../shared/Badge'
+import { TitleBar } from './TitleBar'
 
 export function AppShell({
   activePage,
@@ -23,35 +24,46 @@ export function AppShell({
 }) {
   const selectedSystem = tradeSystems.find(system => system.activeVersionId === selectedVersionId)
 
+  const handleHeaderDoubleClick = useCallback(async () => {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      getCurrentWindow().toggleMaximize()
+    } catch { /* not in Tauri */ }
+  }, [])
+
   return (
-    <div className="grid h-screen grid-cols-[200px_minmax(680px,1fr)] grid-rows-[56px_1fr] bg-background">
+    <div className="grid h-screen grid-cols-[200px_minmax(680px,1fr)] grid-rows-[36px_1fr] bg-background">
       <header
-        className="col-span-2 grid grid-cols-[200px_1fr_auto] items-center border-b border-border/70 bg-panel/95 px-3"
+        className="col-span-2 grid grid-cols-[200px_1fr_auto] items-center border-b border-border/60 bg-panel/95"
         data-tauri-drag-region
+        onDoubleClick={handleHeaderDoubleClick}
       >
-        <div className="flex items-center gap-2 pl-[72px]" data-tauri-drag-region>
-          <img src={appIcon} className="h-9 w-9 object-contain" alt="QSGG" />
-          <div className="leading-tight" data-tauri-drag-region>
-            <div className="font-mono text-sm font-semibold text-foreground">QSGG</div>
-            <div className="text-[10px] font-mono text-muted-foreground">trade desk</div>
+        <div className="flex items-center gap-2 pl-[72px]">
+          <img src={appIcon} className="h-7 w-7 object-contain" alt="QSGG" />
+          <div className="leading-tight">
+            <div className="font-mono text-xs font-semibold text-foreground">QSGG</div>
+            <div className="text-[9px] font-mono text-muted-foreground">trade desk</div>
           </div>
         </div>
 
-        <div className="flex justify-center" data-tauri-drag-region>
-          <div className="inline-flex items-center gap-1 rounded-[8px] bg-muted/45 p-1 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
+        <div className="flex justify-center">
+          <div className="inline-flex items-center gap-1 rounded-[6px] bg-muted/45 p-0.5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
             <StatusPill label="交易系统" value={selectedSystem ? `${selectedSystem.name} v${selectedSystem.activeVersion ?? '-'}` : selectedVersionId ? selectedVersionId : '未选择'} tone={selectedVersionId ? 'success' : 'warning'} />
             <StatusPill label="Provider" value={activeProvider?.name ?? '未配置'} tone={activeProvider ? 'info' : 'warning'} />
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => onPageChange('settings')}
-          className="inline-flex h-8 w-8 items-center justify-center text-muted-foreground transition hover:bg-muted hover:text-foreground"
-          title="设置"
-        >
-          <Settings className="h-4 w-4" />
-        </button>
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={() => onPageChange('settings')}
+            className="inline-flex h-7 w-7 items-center justify-center text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            title="设置"
+          >
+            <Settings className="h-3.5 w-3.5" />
+          </button>
+          <TitleBar />
+        </div>
       </header>
 
       <aside className="bg-panel/90">
@@ -103,8 +115,8 @@ function StatusPill({
   tone: 'success' | 'warning' | 'info'
 }) {
   return (
-    <div className="flex h-8 items-center gap-1.5 rounded-[6px] px-3 text-xs" data-tauri-drag-region>
-      <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+    <div className="flex h-7 items-center gap-1.5 rounded-[5px] px-2.5 text-[11px]">
+      <Cpu className="h-3 w-3 text-muted-foreground" />
       <span className="text-muted-foreground">{label}</span>
       <Badge tone={tone}>{value}</Badge>
     </div>
