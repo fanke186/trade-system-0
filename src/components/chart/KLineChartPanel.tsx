@@ -5,7 +5,7 @@ import {
 } from 'klinecharts'
 import { CandleType, type Chart, type Crosshair } from 'klinecharts'
 import { BarChart3 } from 'lucide-react'
-import type { ChartAnnotation, ChartAnnotationPayload, KlineBar } from '../../lib/types'
+import type { ChartAnnotation, ChartAnnotationPayload, KlineBar, SnapTarget } from '../../lib/types'
 import { EmptyState } from '../shared/Panel'
 import { DrawingToolbar } from './DrawingToolbar'
 import { buildKLineChartModel, tradeDateToTimestamp } from './KLineChartModel'
@@ -25,8 +25,8 @@ registerLocale('zh-CN', {
 const CANDLE_PANE_ID = 'candle_pane'
 const SUB_PANE_ID = 'qsgg_sub_pane'
 const DEFAULT_BAR_SPACE = 7
-const CHART_BACKGROUND_COLOR = '#0d0d0d'
-const MA_INDICATOR_NAME = 'QSGGMA'
+const CHART_BACKGROUND_COLOR = '#0e1015'
+const MA_INDICATOR_NAME = 'MA'
 
 export function KLineChartPanel({
   bars,
@@ -74,6 +74,11 @@ export function KLineChartPanel({
   const [subPaneTop, setSubPaneTop] = useState<number | null>(null)
   const [showMagnifier, setShowMagnifier] = useState(false)
   const [magnifierBar, setMagnifierBar] = useState<KlineBar | null>(null)
+  const [magnifierMousePrice, setMagnifierMousePrice] = useState<number | null>(null)
+  const [magnifierSnapTarget, setMagnifierSnapTarget] = useState<SnapTarget | null>(null)
+  const [priceTicks, setPriceTicks] = useState<number[]>([])
+  const [subTicks, setSubTicks] = useState<number[]>([])
+  const [hlineLabels, setHlineLabels] = useState<Array<{ price: number; y: number; color?: string; id: string }>>([])
   const deltaHistoryRef = useRef<number[]>([])
   const drawingToolRef = useRef(drawingTool)
   drawingToolRef.current = drawingTool
@@ -124,24 +129,29 @@ export function KLineChartPanel({
     latestBarsRef.current = chartModel.bars
   }, [chartModel.bars])
 
-  const priceTicks = useMemo(() => {
-    const range = bars.reduce(
-      (next, bar) => ({
-        min: Math.min(next.min, bar.low),
-        max: Math.max(next.max, bar.high)
-      }),
-      { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY }
-    )
-    return createTicks(range.min, range.max, 5)
-  }, [bars])
+  const refreshVisibleTicks = useCallback(() => {
+    const chart = chartRef.current
+    if (!chart) return
+    const visibleRange = chart.getVisibleRange?.()
+    const allBars = latestBarsRef.current
+    if (!visibleRange || allBars.length === 0) return
+    const from = Math.max(0, Math.floor(visibleRange.from))
+    const to = Math.min(allBars.length - 1, Math.ceil(visibleRange.to))
+    const visibleBars = allBars.slice(from, to + 1)
+    if (visibleBars.length === 0) return
 
-  const subTicks = useMemo(() => {
-    const maxValue = bars.reduce(
-      (max, bar) => Math.max(max, subChartType === 'amount' ? bar.amount : bar.volume),
-      Number.NEGATIVE_INFINITY
-    )
-    return createTicks(0, maxValue, 4)
-  }, [bars, subChartType])
+    let minPrice = Number.POSITIVE_INFINITY
+    let maxPrice = Number.NEGATIVE_INFINITY
+    let maxSub = Number.NEGATIVE_INFINITY
+    for (const bar of visibleBars) {
+      if (bar.low < minPrice) minPrice = bar.low
+      if (bar.high > maxPrice) maxPrice = bar.high
+      const subVal = subChartType === 'amount' ? bar.amount : bar.volume
+      if (subVal > maxSub) maxSub = subVal
+    }
+    setPriceTicks(createTicks(minPrice, maxPrice, 5))
+    setSubTicks(createTicks(0, maxSub, 4))
+  }, [subChartType])
 
   // Chart initialization + crosshair subscription
   useEffect(() => {
@@ -153,8 +163,8 @@ export function KLineChartPanel({
       },
       styles: {
         grid: {
-          horizontal: { color: 'rgba(255,255,255,0.07)' },
-          vertical: { color: 'rgba(255,255,255,0.05)' }
+          horizontal: { color: 'rgba(255,255,255,0.04)' },
+          vertical: { color: 'rgba(255,255,255,0.03)' }
         },
         candle: {
           type: CandleType.CandleUpStroke,
@@ -192,18 +202,19 @@ export function KLineChartPanel({
     chart.setBarSpace(DEFAULT_BAR_SPACE)
     configureScrollLimits(chart)
 
-    let resizeTimer: ReturnType<typeof setTimeout> | null = null
+    let resizeRaf = 0
     const resizeObserver =
       typeof ResizeObserver !== 'undefined'
         ? new ResizeObserver(() => {
-            if (resizeTimer) clearTimeout(resizeTimer)
-            resizeTimer = setTimeout(() => {
+            if (resizeRaf) cancelAnimationFrame(resizeRaf)
+            resizeRaf = requestAnimationFrame(() => {
               if (chartRef.current) {
                 chartRef.current.resize()
                 configureScrollLimits(chartRef.current)
                 scheduleFrame(refreshSubPaneTop)
+                scheduleFrame(refreshVisibleTicks)
               }
-            }, 100)
+            })
           })
         : null
     resizeObserver?.observe(hostRef.current)
@@ -232,13 +243,24 @@ export function KLineChartPanel({
         if (hist.length >= 3 && hist.every(d => d >= 300)) {
           setShowMagnifier(true)
           setMagnifierBar(bar)
+          // Compute mouse price from crosshair data
+          const crosshairData = crosshair as { kLineData?: { close?: number; open?: number; high?: number; low?: number } }
+          if (typeof crosshairData.kLineData?.close === 'number') {
+            const mousePrice = crosshairData.kLineData.close
+            setMagnifierMousePrice(mousePrice)
+            setMagnifierSnapTarget(nearestOHLC(mousePrice, bar) ?? null)
+          }
         } else {
           setShowMagnifier(false)
           setMagnifierBar(null)
+          setMagnifierMousePrice(null)
+          setMagnifierSnapTarget(null)
         }
       } else {
         setShowMagnifier(false)
         setMagnifierBar(null)
+        setMagnifierMousePrice(null)
+        setMagnifierSnapTarget(null)
       }
 
       if (crosshair.realX != null && hostRef.current) {
@@ -247,10 +269,12 @@ export function KLineChartPanel({
         crosshairPositionRef.current = pos
         onCrosshairPositionRef.current?.(pos)
       }
+
+      scheduleFrame(refreshVisibleTicks)
     })
 
     return () => {
-      if (resizeTimer) clearTimeout(resizeTimer)
+      if (resizeRaf) cancelAnimationFrame(resizeRaf)
       chart.unsubscribeAction(ActionType.OnCrosshairChange)
       resizeObserver?.disconnect()
       chartRef.current = null
@@ -268,6 +292,7 @@ export function KLineChartPanel({
     chart.applyNewData(chartData, undefined, () => {
       configureScrollLimits(chart)
       refreshSubPaneTop()
+      scheduleFrame(refreshVisibleTicks)
     })
     const nextSignature = chartData.length > 0
       ? `${chartData.length}:${chartData[0]?.timestamp}:${chartData[chartData.length - 1]?.timestamp}`
@@ -336,14 +361,23 @@ export function KLineChartPanel({
     if (!chart) return
 
     const enabledMas = (maLines ?? []).filter(ma => ma.enabled)
-    const existing = chart.getIndicatorByPaneId?.(CANDLE_PANE_ID, MA_INDICATOR_NAME)
-    if (existing) {
-      chart.removeIndicator(CANDLE_PANE_ID, MA_INDICATOR_NAME)
-    }
+    chart.removeIndicator(CANDLE_PANE_ID, MA_INDICATOR_NAME)
 
     if (enabledMas.length > 0) {
-      chart.createIndicator?.(
-        createMaIndicator(enabledMas) as never,
+      chart.createIndicator(
+        {
+          name: MA_INDICATOR_NAME,
+          calcParams: enabledMas.map(ma => ma.period),
+          styles: {
+            lines: enabledMas.map(ma => ({
+              color: ma.color,
+              size: 1,
+              style: LineType.Solid,
+              smooth: false,
+              dashedValue: [],
+            })),
+          },
+        } as never,
         true,
         { id: CANDLE_PANE_ID }
       )
@@ -373,6 +407,41 @@ export function KLineChartPanel({
     subPaneIdRef.current = paneId ?? SUB_PANE_ID
     scheduleFrame(refreshSubPaneTop)
   }, [hasChartData, refreshSubPaneTop, subChartType])
+
+  // Refresh visible-range axis ticks when sub-chart type changes
+  useEffect(() => {
+    scheduleFrame(refreshVisibleTicks)
+  }, [refreshVisibleTicks])
+
+  // Compute horizontal line price label positions
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+
+    const updateLabels = () => {
+      const labels: Array<{ price: number; y: number; color?: string; id: string }> = []
+      for (const ann of annotations) {
+        if (ann.annotationType !== 'horizontal_line' || ann.payload.type !== 'horizontal_line') continue
+        const pixel = chart.convertToPixel(
+          { value: ann.payload.price },
+          { paneId: CANDLE_PANE_ID, absolute: true }
+        ) as { y?: number }
+        if (typeof pixel?.y === 'number' && Number.isFinite(pixel.y)) {
+          labels.push({
+            id: ann.id,
+            price: ann.payload.price,
+            y: pixel.y,
+            color: ann.payload.color,
+          })
+        }
+      }
+      setHlineLabels(labels)
+    }
+
+    // Update after a short delay to ensure chart is ready
+    const timer = setTimeout(updateLabels, 50)
+    return () => clearTimeout(timer)
+  }, [annotations, hasChartData, priceTicks, subPaneTop])
 
   // Log coordinate
   useEffect(() => {
@@ -466,16 +535,29 @@ export function KLineChartPanel({
       <AxisLabels side="left" top={(subPaneTop ?? 0) + 28} bottom={12} values={subTicks} formatter={formatChineseUnit} />
       <AxisLabels side="right" top={(subPaneTop ?? 0) + 28} bottom={12} values={subTicks} formatter={formatChineseUnit} />
 
-      {/* Sub-chart toggle */}
-      <button
-        type="button"
-        onClick={() => onSubChartTypeChange?.(subChartType === 'amount' ? 'volume' : 'amount')}
-        className="absolute left-2 z-30 inline-flex h-6 items-center gap-1.5 bg-background/80 px-2 text-[10px] font-mono text-foreground backdrop-blur-sm transition hover:bg-muted"
-        style={{ top: subPaneTop ?? undefined, bottom: subPaneTop == null ? 18 : undefined }}
-      >
-        <BarChart3 className="h-3 w-3 text-ring" />
-        {subChartType === 'amount' ? '成交额' : '成交量'}
-      </button>
+      {/* Horizontal line price labels */}
+      {hlineLabels.map(hl => (
+        <span
+          key={hl.id}
+          className="pointer-events-none absolute z-25 text-[10px] font-mono text-muted-foreground bg-background/60 px-1 leading-none"
+          style={{ left: 4, top: hl.y - 13, color: hl.color ?? undefined }}
+        >
+          {hl.price.toFixed(2)}
+        </span>
+      ))}
+
+      {/* Sub-chart toggle — positioned above the sub-chart pane, near the separator */}
+      {subPaneTop != null && (
+        <button
+          type="button"
+          onClick={() => onSubChartTypeChange?.(subChartType === 'amount' ? 'volume' : 'amount')}
+          className="absolute left-2 z-30 inline-flex h-5 items-center gap-1.5 bg-background/80 px-2 text-[10px] font-mono text-muted-foreground backdrop-blur-sm transition hover:bg-muted hover:text-foreground"
+          style={{ top: subPaneTop - 22 }}
+        >
+          <BarChart3 className="h-3 w-3 text-ring" />
+          {subChartType === 'amount' ? '成交额' : '成交量'}
+        </button>
+      )}
 
       {showDrawingToolbar && selectedOverlayId && (
         <DrawingToolbar
@@ -486,7 +568,12 @@ export function KLineChartPanel({
         />
       )}
       {showMagnifier && magnifierBar && (
-        <Magnifier bar={magnifierBar} position={crosshairPositionRef.current || 'top-right'} />
+        <Magnifier
+          bar={magnifierBar}
+          position={crosshairPositionRef.current || 'top-right'}
+          mousePrice={magnifierMousePrice}
+          snapTarget={magnifierSnapTarget}
+        />
       )}
     </div>
   )
@@ -550,7 +637,6 @@ function annotationToOverlay(annotation: ChartAnnotation, handlers: AnnotationOv
     needDefaultPointFigure: true,
     mode: OverlayMode.WeakMagnet,
     modeSensitivity: 8,
-    extendData: annotation.payload.label ?? '',
     styles: annotation.payload.color ? { line: { color: annotation.payload.color } } : undefined,
     onClick: (event: OverlayCallbackEvent) => {
       handlers.onSelect(annotation, event)
@@ -570,6 +656,7 @@ function annotationToOverlay(annotation: ChartAnnotation, handlers: AnnotationOv
     return {
       ...base,
       name: 'priceLine',
+      extendData: '',
       points: [
         {
           timestamp: Date.now(),
@@ -582,6 +669,7 @@ function annotationToOverlay(annotation: ChartAnnotation, handlers: AnnotationOv
     return {
       ...base,
       name: 'rayLine',
+      extendData: annotation.payload.label ?? '',
       points: [
         {
           timestamp: tradeDateToTimestamp(annotation.payload.start.date),
@@ -626,12 +714,19 @@ function pointsToPayload(
     const price = points[0]?.value
     if (typeof price !== 'number') return null
     const base = basePayload?.type === 'horizontal_line' ? basePayload : undefined
+    // Try snap to nearest bar's OHLC if we have data index
+    const barIndex = typeof points[0]?.dataIndex === 'number'
+      ? Math.max(0, Math.min(bars.length - 1, Math.round(points[0].dataIndex)))
+      : -1
+    const snapBar = barIndex >= 0 ? bars[barIndex] : undefined
+    const snapped = snapBar ? (snapPrice(price, snapBar) ?? { price }) : { price }
     return {
       type: 'horizontal_line',
-      price,
+      price: snapped.price,
       label: base?.label ?? '手动画线',
       ...(base?.color ? { color: base.color } : {}),
-      ...(base?.reason ? { reason: base.reason } : {})
+      ...(base?.reason ? { reason: base.reason } : {}),
+      ...(snapped.snappedTo ? { snappedTo: snapped.snappedTo } : {}),
     }
   }
 
@@ -639,15 +734,15 @@ function pointsToPayload(
   const second = pointToBar(points[1], bars)
   if (!first || !second) return null
   const base = basePayload?.type === 'ray' ? basePayload : undefined
-  const snapped = nearestHighLow(points[1]?.value, second.bar)
+  const startSnapped = snapPrice(first.price, first.bar)
+  const endSnapped = snapPrice(second.price, second.bar)
   return {
     type: 'ray',
-    start: { date: first.bar.date, price: first.price },
-    end: { date: second.bar.date, price: second.price },
+    start: { date: first.bar.date, price: startSnapped?.price ?? first.price, ...(startSnapped?.snappedTo ? { snappedTo: startSnapped.snappedTo } : {}) },
+    end: { date: second.bar.date, price: endSnapped?.price ?? second.price, ...(endSnapped?.snappedTo ? { snappedTo: endSnapped.snappedTo } : {}) },
     label: base?.label ?? '手动画线',
     ...(base?.color ? { color: base.color } : {}),
     ...(base?.reason ? { reason: base.reason } : {}),
-    ...(snapped ? { snappedTo: snapped } : {})
   }
 }
 
@@ -671,13 +766,41 @@ function pointToBar(
   return { bar: found, price: point.value }
 }
 
-function nearestHighLow(price: number | undefined, bar: KlineBar) {
-  if (typeof price !== 'number') return undefined
+function nearestOHLC(price: number | undefined, bar: KlineBar): SnapTarget | undefined {
+  if (typeof price !== 'number' || !bar) return undefined
   const range = Math.max(bar.high - bar.low, 0.01)
   const threshold = range * 0.08
-  if (Math.abs(price - bar.high) <= threshold) return 'high'
-  if (Math.abs(price - bar.low) <= threshold) return 'low'
-  return undefined
+  const candidates: Array<{ key: SnapTarget; value: number }> = [
+    { key: 'high', value: bar.high },
+    { key: 'low', value: bar.low },
+    { key: 'open', value: bar.open },
+    { key: 'close', value: bar.close },
+  ]
+  let best: SnapTarget | undefined
+  let bestDiff = threshold
+  for (const c of candidates) {
+    const diff = Math.abs(price - c.value)
+    if (diff < bestDiff) {
+      bestDiff = diff
+      best = c.key
+    }
+  }
+  return best
+}
+
+function snapPrice(price: number | undefined, bar: KlineBar): { price: number; snappedTo?: SnapTarget } | undefined {
+  if (typeof price !== 'number' || !bar) return undefined
+  const snappedTo = nearestOHLC(price, bar)
+  if (snappedTo) {
+    const ohlc: Record<SnapTarget, number> = {
+      open: bar.open,
+      high: bar.high,
+      low: bar.low,
+      close: bar.close,
+    }
+    return { price: ohlc[snappedTo], snappedTo }
+  }
+  return { price }
 }
 
 function createSubChartIndicator(type: 'volume' | 'amount') {
@@ -738,47 +861,6 @@ function createSubChartIndicator(type: 'volume' | 'amount') {
         { color: '#bb9af7', size: 1, style: LineType.Solid, smooth: false, dashedValue: [] },
         { color: '#1677ff', size: 1, style: LineType.Solid, smooth: false, dashedValue: [] }
       ]
-    }
-  }
-}
-
-function createMaIndicator(maLines: Array<{ period: number; color: string; enabled: boolean }>) {
-  const periods = maLines.map(ma => ma.period)
-  return {
-    name: MA_INDICATOR_NAME,
-    shortName: 'MA',
-    series: IndicatorSeries.Price,
-    calcParams: periods,
-    precision: 2,
-    figures: periods.map(period => ({
-      key: `ma${period}`,
-      title: `MA${period}: `,
-      type: 'line'
-    })),
-    calc: (dataList: Array<{ close?: number }>) => {
-      const sums = new Map<number, number>()
-      return dataList.map((data, index) => {
-        const close = data.close ?? 0
-        const result: Record<string, number> = {}
-        periods.forEach(period => {
-          const nextSum = (sums.get(period) ?? 0) + close
-          sums.set(period, nextSum)
-          if (index >= period - 1) {
-            result[`ma${period}`] = nextSum / period
-            sums.set(period, nextSum - (dataList[index - period + 1]?.close ?? 0))
-          }
-        })
-        return result
-      })
-    },
-    styles: {
-      lines: maLines.map(ma => ({
-        color: ma.color,
-        size: 1,
-        style: LineType.Solid,
-        smooth: false,
-        dashedValue: []
-      }))
     }
   }
 }

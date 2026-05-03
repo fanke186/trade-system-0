@@ -1,4 +1,4 @@
-import { Settings } from 'lucide-react'
+import { Minus, MoveUpRight, Settings } from 'lucide-react'
 import { cn } from '../../lib/cn'
 
 type Frequency = '1d' | '1w' | '1M' | '1Q' | '1Y'
@@ -72,30 +72,33 @@ export function ChartToolbar({
       </select>
 
       {/* Drawing tool buttons */}
-      <div className="flex gap-0.5">
+      <div className="flex items-center gap-0.5">
+        <span className="mr-1 text-[11px] text-muted-foreground font-mono">画线</span>
         <button
           type="button"
           onClick={() => onDrawingToolChange(drawingTool === 'horizontal_line' ? null : 'horizontal_line')}
           className={cn(
-            'h-7 px-2.5 text-xs font-mono transition',
+            'h-7 w-7 flex items-center justify-center transition',
             drawingTool === 'horizontal_line'
               ? 'bg-ring text-panel'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground',
           )}
+          title="横线"
         >
-          横线
+          <Minus className="h-3.5 w-3.5" />
         </button>
         <button
           type="button"
           onClick={() => onDrawingToolChange(drawingTool === 'ray' ? null : 'ray')}
           className={cn(
-            'h-7 px-2.5 text-xs font-mono transition',
+            'h-7 w-7 flex items-center justify-center transition',
             drawingTool === 'ray'
               ? 'bg-ring text-panel'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground',
           )}
+          title="射线"
         >
-          射线
+          <MoveUpRight className="h-3.5 w-3.5" />
         </button>
       </div>
 

@@ -1,39 +1,86 @@
-import { useEffect, useRef } from 'react'
-import type { KlineBar } from '../../lib/types'
+import type { KlineBar, SnapTarget } from '../../lib/types'
+
+const OHLC_LABELS: Array<{ key: keyof KlineBar; label: string }> = [
+  { key: 'open', label: '开' },
+  { key: 'high', label: '高' },
+  { key: 'low', label: '低' },
+  { key: 'close', label: '收' },
+]
 
 export function Magnifier({
   bar,
-  position
+  position,
+  mousePrice,
+  snapTarget,
 }: {
   bar: KlineBar
   position: 'top-left' | 'top-right'
+  mousePrice?: number | null
+  snapTarget?: SnapTarget | null
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.fillStyle = 'rgba(13,13,13,0.92)'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-    ctx.fillStyle = '#eee'
-    ctx.font = '10px "DM Mono", monospace'
-    ctx.fillText(`开 ${bar.open.toFixed(2)}`, 8, 18)
-    ctx.fillText(`高 ${bar.high.toFixed(2)}`, 8, 34)
-    ctx.fillText(`低 ${bar.low.toFixed(2)}`, 8, 50)
-    ctx.fillText(`收 ${bar.close.toFixed(2)}`, 8, 66)
-    if (bar.changePct != null) {
-      ctx.fillStyle = bar.changePct >= 0 ? '#0f9f6e' : '#dc2626'
-      ctx.fillText(`${bar.changePct > 0 ? '+' : ''}${bar.changePct.toFixed(2)}%`, 90, 18)
-    }
-  }, [bar])
-
   const posClass = position === 'top-left' ? 'left-2 top-2' : 'right-2 top-2'
+  const priceRange = bar.high - bar.low || 0.01
+  const mousePct = mousePrice != null ? (mousePrice - bar.low) / priceRange : null
 
   return (
-    <canvas ref={canvasRef} width={160} height={80}
-            className={`absolute z-50 ${posClass} border border-border`} />
+    <div className={`absolute z-50 ${posClass} border border-border/80 bg-background/92 backdrop-blur-sm px-2.5 py-2 font-mono text-[11px] shadow-lg`} style={{ width: 168 }}>
+      {/* Date */}
+      <div className="text-muted-foreground mb-1.5 text-[10px]">{bar.date}</div>
+
+      {/* OHLC rows */}
+      {OHLC_LABELS.map(({ key, label }) => {
+        const value = bar[key] as number
+        const isSnapped = snapTarget === key
+        return (
+          <div
+            key={key}
+            className={'flex justify-between leading-relaxed' + (isSnapped ? ' text-ring' : ' text-foreground')}
+          >
+            <span className="text-muted-foreground">{label}</span>
+            <span>{value.toFixed(2)}</span>
+          </div>
+        )
+      })}
+
+      {/* Mouse price */}
+      {mousePrice != null && (
+        <div className="mt-1 border-t border-border/50 pt-1 flex justify-between leading-relaxed text-warning">
+          <span className="text-muted-foreground">当前</span>
+          <span>{mousePrice.toFixed(2)}</span>
+        </div>
+      )}
+
+      {/* Snap indicator */}
+      {snapTarget && (
+        <div className="mt-0.5 text-[10px] text-ring">
+          吸附: {snapTarget} {bar[snapTarget]?.toFixed(2)}
+        </div>
+      )}
+
+      {/* Mini price ruler */}
+      <div className="mt-1.5 relative h-16 bg-muted/30">
+        {/* Ticks */}
+        {[0, 0.25, 0.5, 0.75, 1].map(pct => {
+          const price = bar.low + priceRange * (1 - pct)
+          return (
+            <div
+              key={pct}
+              className="absolute left-0 right-0 flex items-center"
+              style={{ top: `${pct * 100}%` }}
+            >
+              <span className="text-[8px] text-muted-foreground ml-0.5 leading-none">{price.toFixed(2)}</span>
+              <span className="flex-1 border-t border-border/40 mx-1" />
+            </div>
+          )
+        })}
+        {/* Mouse indicator on ruler */}
+        {mousePct != null && mousePct >= 0 && mousePct <= 1 && (
+          <div
+            className="absolute left-0 right-0 h-px bg-warning"
+            style={{ top: `${(1 - mousePct) * 100}%` }}
+          />
+        )}
+      </div>
+    </div>
   )
 }

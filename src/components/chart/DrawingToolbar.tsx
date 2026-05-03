@@ -1,7 +1,7 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Trash2, Undo2, GripHorizontal } from 'lucide-react'
 
-const COLORS = ['#4d90fe', '#f0b93b', '#bb9af7', '#7dcfff', '#ff8c69']
+const COLORS = ['#2d8cff', '#f5c542', '#9b7bff', '#29c7ac', '#c9d1d9']
 
 export function DrawingToolbar({
   position,
@@ -17,6 +17,8 @@ export function DrawingToolbar({
   const [pos, setPos] = useState(position)
   const [dragging, setDragging] = useState(false)
   const dragRef = useRef({ startX: 0, startY: 0, origX: 0, origY: 0 })
+
+  useEffect(() => setPos(position), [position])
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()

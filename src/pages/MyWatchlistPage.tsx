@@ -19,12 +19,12 @@ import {
 
 const DEFAULT_SETTINGS: ChartSettings = {
   maLines: [
-    { period: 5, color: '#f0b93b', enabled: true },
-    { period: 10, color: '#7dcfff', enabled: true },
-    { period: 20, color: '#bb9af7', enabled: true },
-    { period: 60, color: '#ff6b35', enabled: false },
+    { period: 5, color: '#f5c542', enabled: true },
+    { period: 10, color: '#2d8cff', enabled: true },
+    { period: 20, color: '#9b7bff', enabled: true },
+    { period: 30, color: '#29c7ac', enabled: true },
   ],
-  coordType: 'log',
+  coordType: 'normal',
 }
 
 export function MyWatchlistPage({
@@ -44,7 +44,18 @@ export function MyWatchlistPage({
   const [settings, setSettings] = useState<ChartSettings>(() => {
     try {
       const stored = window.localStorage.getItem('qsgg.chartSettings')
-      return stored ? { ...DEFAULT_SETTINGS, ...JSON.parse(stored) } : DEFAULT_SETTINGS
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        const merged = { ...DEFAULT_SETTINGS, ...parsed }
+        // 补齐 DEFAULT 中有但旧配置没有的 MA
+        for (const defMa of DEFAULT_SETTINGS.maLines) {
+          if (!merged.maLines.some((m: { period: number }) => m.period === defMa.period)) {
+            merged.maLines.push(defMa)
+          }
+        }
+        return merged
+      }
+      return DEFAULT_SETTINGS
     } catch {
       return DEFAULT_SETTINGS
     }
@@ -89,15 +100,27 @@ export function MyWatchlistPage({
     window.localStorage.setItem('qsgg.subChartType', subChartType)
   }, [subChartType])
 
+  useEffect(() => {
+    if (!drawingTool) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isTypingTarget(e.target)) {
+        setDrawingTool(null)
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [drawingTool])
+
   const invalidateAnnotations = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ['annotations', stockCode, selectedVersionId] })
-  }, [queryClient, selectedVersionId, stockCode])
+    void queryClient.invalidateQueries({ queryKey: ['annotations', stockCode, frequency, selectedVersionId] })
+  }, [queryClient, selectedVersionId, stockCode, frequency])
 
   const saveMutation = useMutation({
     mutationFn: ({ id, payload }: { id?: string; payload: ChartAnnotationPayload }) =>
       commands.saveChartAnnotation({
         id,
         stockCode,
+        period: frequency,
         tradeSystemVersionId: selectedVersionId ?? null,
         reviewId: null,
         source: 'user',
@@ -283,4 +306,10 @@ export function MyWatchlistPage({
       />
     </div>
   )
+}
+
+function isTypingTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName.toLowerCase()
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable
 }
